@@ -381,6 +381,6 @@ python -m clause_code
 
 Made with ❤️ and festive cheer
 
-[Report Bug](https://github.com/yourusername/clause-code/issues) · [Request Feature](https://github.com/yourusername/clause-code/issues) · [Documentation](https://github.com/yourusername/clause-code#readme)
+[Report Bug](https://github.com/nothans/clause-code/issues) · [Request Feature](https://github.com/nothans/clause-code/issues) · [Documentation](https://github.com/nothans/clause-code#readme)
 
 </div>
