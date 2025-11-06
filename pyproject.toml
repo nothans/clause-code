@@ -1,0 +1,59 @@
+[project]
+name = "clause-code"
+version = "1.0.0"
+description = "The AI coding assistant that brings holiday cheer to your terminal"
+authors = [{name = "Hans Scharler"}]
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+keywords = ["ai", "coding", "assistant", "christmas", "claude", "anthropic"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+dependencies = [
+    "anthropic>=0.72.0",
+    "rich>=13.7.0",
+    "prompt-toolkit>=3.0.43",
+    "click>=8.1.7",
+    "pydantic>=2.5.0",
+    "python-dotenv>=1.0.0",
+    "aiofiles>=23.2.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+clause-code = "clause_code.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/yourusername/clause-code"
+Repository = "https://github.com/yourusername/clause-code"
+Documentation = "https://github.com/yourusername/clause-code#readme"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/clause_code"]
+
+[tool.black]
+line-length = 100
+target-version = ['py310']
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
