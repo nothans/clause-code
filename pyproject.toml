@@ -39,9 +39,9 @@ dev = [
 clause-code = "clause_code.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/yourusername/clause-code"
-Repository = "https://github.com/yourusername/clause-code"
-Documentation = "https://github.com/yourusername/clause-code#readme"
+Homepage = "https://github.com/nothans/clause-code"
+Repository = "https://github.com/nothans/clause-code"
+Documentation = "https://github.com/nothans/clause-code#readme"
 
 [build-system]
 requires = ["hatchling"]
