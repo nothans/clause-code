@@ -1,7 +1,5 @@
 """Tests for festive theming system."""
 
-import pytest
-
 from clause_code.theme import FestiveTheme, GrinchTheme
 
 

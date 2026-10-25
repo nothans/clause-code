@@ -1,299 +1,261 @@
-"""Claude agent integration using Anthropic SDK."""
+"""Claude integration built on the Claude Agent SDK."""
 
-import asyncio
-from typing import AsyncGenerator, Optional
+from collections import deque
+from collections.abc import AsyncIterator, Callable
+from pathlib import Path
+from typing import Optional
 
-from anthropic import AsyncAnthropic
-from rich.console import Console
-from rich.panel import Panel
-from rich.syntax import Syntax
+from claude_agent_sdk import (
+    ClaudeAgentOptions,
+    ClaudeSDKClient,
+    HookMatcher,
+    Message,
+    PermissionMode,
+)
 
+from ._version import __version__
+from .permissions import WRITE_TOOLS_MATCHER, ToolApprover, make_containment_hook
 from .theme import FestiveTheme, GrinchTheme
 
+MODELS = {
+    "opus": {
+        "id": "claude-opus-5-5",
+        "name": "Claude Opus 5.5",
+        "emoji": "🎅",
+        "description": "Most capable, best for complex coding and agentic work",
+    },
+    "sonnet": {
+        "id": "claude-sonnet-5-5",
+        "name": "Claude Sonnet 5.5",
+        "emoji": "⛷️",
+        "description": "Fast and capable for everyday coding",
+    },
+    "haiku": {
+        "id": "claude-haiku-5-5",
+        "name": "Claude Haiku 5.5",
+        "emoji": "🦌",
+        "description": "Fastest and cheapest, for quick questions",
+    },
+}
+DEFAULT_MODEL = "opus"
+CONTEXT_WINDOW = "1M"
 
-class ClaudeAgent:
-    """Main agent for interacting with Claude via Anthropic SDK."""
+# Claude asks in plain text instead; Clause Code has no UI for this tool.
+DISALLOWED_TOOLS = ["AskUserQuestion"]
 
-    # Latest Claude model IDs (as of October 2025)
-    MODELS = {
-        "sonnet": {
-            "id": "claude-sonnet-4-5-20250929",
-            "name": "Claude Sonnet 4.5",
-            "emoji": "⛷️",
-            "description": "Best for coding and agentic tasks",
-            "max_tokens": 64000,
-        },
-        "haiku": {
-            "id": "claude-haiku-4-5-20251001",
-            "name": "Claude Haiku 4.5",
-            "emoji": "🦌",
-            "description": "Fastest model with near-frontier intelligence",
-            "max_tokens": 64000,
-        },
-        "opus": {
-            "id": "claude-opus-4-1-20250805",
-            "name": "Claude Opus 4.1",
-            "emoji": "🎅",
-            "description": "Most capable for complex reasoning",
-            "max_tokens": 32000,
-        },
-    }
+_PERSONA_BASE = """
+You are running inside Clause Code, a holiday-themed coding assistant in the user's
+terminal. If asked who you are, you are Clause Code, built on Claude.
+
+Clause Code asks the user to approve file edits and shell commands, and it only allows
+file writes inside the project folder ({project}). If the user declines an action, ask
+how they would like to proceed instead of retrying it."""
+
+_FESTIVE_TONE = """
+Bring light holiday cheer to your conversational replies: a seasonal word or emoji now
+and then. Keep code, comments, commands, commit messages and file contents professional
+and free of holiday theming unless the user asks for it."""
+
+_MINIMAL_TONE = """
+The user has chosen minimal mode: use a plain, professional tone with no holiday theming."""
+
+
+def build_persona(project_folder: Path, festive: bool) -> str:
+    """Build the instructions appended to Claude Code's system prompt.
+
+    Args:
+        project_folder: Folder Claude works in
+        festive: Whether festive mode is on
+
+    Returns:
+        Text for the system prompt preset's ``append`` field
+    """
+    tone = _FESTIVE_TONE if festive else _MINIMAL_TONE
+    return _PERSONA_BASE.format(project=project_folder) + "\n" + tone
+
+
+class ClauseAgent:
+    """A Claude Code agent session scoped to one project folder."""
 
     def __init__(
         self,
-        api_key: str,
-        model: str = "sonnet",
+        project_folder: Path,
+        *,
+        model: str = DEFAULT_MODEL,
         festive_mode: bool = True,
-        console: Optional[Console] = None,
+        api_key: Optional[str] = None,
+        approver: Optional[ToolApprover] = None,
+        client_factory: Callable[[ClaudeAgentOptions], ClaudeSDKClient] = ClaudeSDKClient,
     ):
-        """Initialize Claude agent.
+        """Initialize the agent.
+
+        Args:
+            project_folder: Folder Claude reads and writes in
+            model: Model to use (opus, sonnet, or haiku)
+            festive_mode: Whether to use festive theming
+            api_key: Anthropic API key; falls back to the environment when None
+            approver: Asks the user before edits and commands
+            client_factory: Builds the SDK client (swapped out in tests)
+        """
+        if model not in MODELS:
+            raise ValueError(f"Unknown model: {model}")
+        self.project_folder = Path(project_folder).expanduser().resolve()
+        self.model = model
+        self.festive_mode = festive_mode
+        self.api_key = api_key
+        self.approver = approver
+        self.auto_accept_edits = False
+        self.stderr_tail: deque[str] = deque(maxlen=50)
+        self._client_factory = client_factory
+        self._client: Optional[ClaudeSDKClient] = None
+
+    @property
+    def theme(self):
+        """Theme matching the current mode."""
+        return FestiveTheme if self.festive_mode else GrinchTheme
+
+    @property
+    def model_info(self) -> dict:
+        """Information about the current model."""
+        return MODELS[self.model]
+
+    @property
+    def permission_mode(self) -> PermissionMode:
+        """Permission mode matching the auto-accept setting."""
+        return "acceptEdits" if self.auto_accept_edits else "default"
+
+    @property
+    def connected(self) -> bool:
+        """Whether a session is open."""
+        return self._client is not None
+
+    def build_options(self) -> ClaudeAgentOptions:
+        """Build the SDK options for a new session."""
+        env = {"CLAUDE_AGENT_SDK_CLIENT_APP": f"clause-code/{__version__}"}
+        if self.api_key:
+            env["ANTHROPIC_API_KEY"] = self.api_key
+
+        return ClaudeAgentOptions(
+            model=MODELS[self.model]["id"],
+            effort="high",
+            cwd=str(self.project_folder),
+            system_prompt={
+                "type": "preset",
+                "preset": "claude_code",
+                "append": build_persona(self.project_folder, self.festive_mode),
+            },
+            # Load the project's CLAUDE.md and .claude/settings.json, but not the
+            # user's personal Claude Code settings.
+            setting_sources=["project"],
+            permission_mode=self.permission_mode,
+            can_use_tool=self.approver,
+            hooks={
+                "PreToolUse": [
+                    HookMatcher(
+                        matcher=WRITE_TOOLS_MATCHER,
+                        hooks=[make_containment_hook(lambda: self.project_folder)],
+                    )
+                ]
+            },
+            disallowed_tools=DISALLOWED_TOOLS,
+            include_partial_messages=True,
+            env=env,
+            stderr=self.stderr_tail.append,
+        )
+
+    async def connect(self) -> None:
+        """Open a new session."""
+        if self._client is not None:
+            return
+        client = self._client_factory(self.build_options())
+        await client.connect()
+        self._client = client
+
+    async def disconnect(self) -> None:
+        """Close the session."""
+        client, self._client = self._client, None
+        if client is not None:
+            await client.disconnect()
+
+    async def new_session(self) -> None:
+        """Start a fresh conversation."""
+        await self.disconnect()
+        if self.approver:
+            self.approver.reset()
+        await self.connect()
+
+    async def set_project(self, folder: Path) -> None:
+        """Move to another project folder. Starts a new session.
+
+        Args:
+            folder: New project folder
+        """
+        self.project_folder = Path(folder).expanduser().resolve()
+        if self.connected:
+            await self.new_session()
+
+    async def set_api_key(self, api_key: str) -> None:
+        """Use a new API key. Starts a new session.
 
         Args:
             api_key: Anthropic API key
-            model: Model to use (sonnet, haiku, or opus)
-            festive_mode: Whether to use festive theming
-            console: Rich console for output
         """
-        self.client = AsyncAnthropic(api_key=api_key)
-        self.model = model
-        self.festive_mode = festive_mode
-        self.console = console or Console()
-        self.conversation_history = []
+        self.api_key = api_key
+        if self.connected:
+            await self.new_session()
 
-        # Select theme based on mode
-        self.theme = FestiveTheme if festive_mode else GrinchTheme
-
-    def get_model_id(self) -> str:
-        """Get the current model ID.
-
-        Returns:
-            Claude model ID string
-        """
-        return self.MODELS[self.model]["id"]
-
-    def get_model_info(self) -> dict:
-        """Get information about the current model.
-
-        Returns:
-            Dictionary with model information
-        """
-        return self.MODELS[self.model]
-
-    async def chat(
-        self, message: str, system_prompt: Optional[str] = None, project_folder: Optional[str] = None
-    ) -> AsyncGenerator[str, None]:
-        """Chat with Claude and stream the response.
+    async def set_model(self, model: str) -> None:
+        """Switch models, keeping the conversation.
 
         Args:
-            message: User message
-            system_prompt: Optional system prompt
-            project_folder: Optional project folder for context
-
-        Yields:
-            Response text chunks
+            model: Model name (opus, sonnet, or haiku)
         """
-        # Add user message to history
-        self.conversation_history.append({"role": "user", "content": message})
-
-        # Show thinking state
-        thinking_msg = self.theme.get_thinking_state()
-        self.console.print(f"\n{thinking_msg}", style="italic green")
-
-        try:
-            # Create streaming request
-            model_id = self.get_model_id()
-            max_tokens = self.MODELS[self.model]["max_tokens"]
-
-            messages_to_send = self.conversation_history.copy()
-
-            # Build system prompt
-            base_system = """You are Clause Code, a festive AI coding assistant that brings holiday cheer
-to development! You help developers write code, build projects, and solve problems with a touch of
-Christmas spirit. You're powered by Claude and built by the Clause Code team.
-
-When helping users build projects or write code, you should:
-- Create complete, working files with proper structure
-- Suggest file names and paths
-- Write full implementations, not just snippets
-- Include necessary imports, comments, and documentation
-- Build projects step-by-step with clear explanations"""
-
-            if project_folder:
-                base_system += f"""
-
-IMPORTANT: The user has set a project folder at: {project_folder}
-
-When creating or editing files:
-1. Use this as the base directory for all file paths
-2. Create files directly in this folder structure
-3. Suggest appropriate subdirectories (src/, tests/, etc.)
-4. When you provide code, I will automatically save it to files for the user
-5. Use clear section markers like "File: path/to/file.py" before code blocks
-6. After providing code, confirm what files were created
-
-Format your file creations like this:
-**File: `path/to/file.py`**
-```python
-# Your code here
-```
-
-This helps me automatically save files to the project folder."""
-
-            if system_prompt:
-                base_system += f"\n\n{system_prompt}"
-
-            # Prepare stream parameters
-            stream_params = {
-                "model": model_id,
-                "messages": messages_to_send,
-                "max_tokens": max_tokens,
-                "temperature": 0.2,
-                "system": base_system,
-            }
-
-            async with self.client.messages.stream(**stream_params) as stream:
-                full_response = []
-                async for text in stream.text_stream:
-                    full_response.append(text)
-                    yield text
-
-                # Add assistant response to history
-                full_text = "".join(full_response)
-                self.conversation_history.append({"role": "assistant", "content": full_text})
-
-        except Exception as e:
-            error_msg = self.theme.get_error_message()
-            self.console.print(f"\n{error_msg}", style="bold red")
-
-            # Provide more specific error messages
-            error_str = str(e)
-            if "authentication" in error_str.lower() or "api key" in error_str.lower():
-                self.console.print("🔑 API key issue. Please check your key with /setkey", style="yellow")
-            elif "rate limit" in error_str.lower():
-                self.console.print("⏱️ Rate limit reached. Please wait a moment and try again.", style="yellow")
-            elif "timeout" in error_str.lower():
-                self.console.print("⏱️ Request timed out. Please check your connection and try again.", style="yellow")
-            elif "connection" in error_str.lower() or "network" in error_str.lower():
-                self.console.print("🌐 Network issue. Please check your internet connection.", style="yellow")
-            else:
-                self.console.print(f"Error: {error_str}", style="red")
-
-            yield ""
-
-    async def generate_code(
-        self, prompt: str, language: str = "python"
-    ) -> tuple[str, str]:
-        """Generate code based on a prompt.
-
-        Args:
-            prompt: Description of what code to generate
-            language: Programming language
-
-        Returns:
-            Tuple of (code, explanation)
-        """
-        system_prompt = f"""You are an expert {language} programmer. Generate clean, 
-well-documented code. Include comments explaining key parts. Focus on best practices 
-and readability."""
-
-        full_prompt = f"""Generate {language} code for the following request:
-
-{prompt}
-
-Please provide:
-1. The complete, working code
-2. A brief explanation of how it works"""
-
-        # Show thinking state
-        thinking_msg = self.theme.get_thinking_state()
-        self.console.print(f"\n{thinking_msg}", style="italic green")
-
-        try:
-            model_id = self.get_model_id()
-            response = await self.client.messages.create(
-                model=model_id,
-                messages=[{"role": "user", "content": full_prompt}],
-                max_tokens=self.MODELS[self.model]["max_tokens"],
-                temperature=0.2,
-                system=system_prompt,
-            )
-
-            # Parse response
-            content = response.content[0].text
-
-            # Try to extract code and explanation
-            # This is a simple heuristic - in practice, you might want more sophisticated parsing
-            code = content
-            explanation = ""
-
-            return code, explanation
-
-        except Exception as e:
-            error_msg = self.theme.get_error_message()
-            self.console.print(f"\n{error_msg}", style="bold red")
-
-            # Provide more specific error messages
-            error_str = str(e)
-            if "authentication" in error_str.lower() or "api key" in error_str.lower():
-                self.console.print("🔑 API key issue. Please check your key with /setkey", style="yellow")
-            elif "rate limit" in error_str.lower():
-                self.console.print("⏱️ Rate limit reached. Please wait a moment and try again.", style="yellow")
-            elif "connection" in error_str.lower():
-                self.console.print("🌐 Network issue. Please check your internet connection.", style="yellow")
-            else:
-                self.console.print(f"Error: {error_str}", style="red")
-
-            return "", ""
-
-    def render_code(self, code: str, language: str = "python", title: str = None) -> None:
-        """Render code with syntax highlighting.
-
-        Args:
-            code: Code to render
-            language: Programming language for syntax highlighting
-            title: Optional title for the code panel
-        """
-        if not title:
-            title = f"🎁 {language.title()} Code" if self.festive_mode else f"{language.title()} Code"
-
-        syntax = Syntax(
-            code,
-            language,
-            theme="monokai",
-            line_numbers=True,
-            word_wrap=False,
-            background_color="default",
-        )
-
-        panel = Panel(
-            syntax,
-            title=title,
-            border_style="green" if self.festive_mode else "blue",
-            padding=(1, 2),
-        )
-
-        self.console.print(panel)
-
-    def clear_history(self) -> None:
-        """Clear conversation history."""
-        self.conversation_history = []
-
-    def set_model(self, model: str) -> None:
-        """Set the model to use.
-
-        Args:
-            model: Model name (sonnet, haiku, or opus)
-        """
-        if model in self.MODELS:
-            self.model = model
-        else:
+        if model not in MODELS:
             raise ValueError(f"Unknown model: {model}")
+        if self._client is not None:
+            await self._client.set_model(MODELS[model]["id"])
+        self.model = model
+
+    async def set_auto_accept(self, enabled: bool) -> None:
+        """Turn auto-accepting file edits on or off.
+
+        Args:
+            enabled: Whether edits inside the project run without asking
+        """
+        if self._client is not None:
+            await self._client.set_permission_mode("acceptEdits" if enabled else "default")
+        self.auto_accept_edits = enabled
 
     def set_festive_mode(self, enabled: bool) -> None:
-        """Set festive mode.
+        """Set festive mode. Claude's tone follows from the next session.
 
         Args:
             enabled: Whether to enable festive mode
         """
         self.festive_mode = enabled
-        self.theme = FestiveTheme if enabled else GrinchTheme
+
+    async def send(self, prompt: str) -> AsyncIterator[Message]:
+        """Send a prompt and stream messages until Claude's turn ends.
+
+        Args:
+            prompt: User message
+
+        Yields:
+            SDK messages, ending with a ResultMessage
+        """
+        await self.connect()
+        await self._client.query(prompt)
+        async for message in self._client.receive_response():
+            yield message
+
+    async def interrupt(self) -> None:
+        """Stop Claude's current turn."""
+        if self._client is not None:
+            await self._client.interrupt()
+
+    async def __aenter__(self) -> "ClauseAgent":
+        await self.connect()
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        await self.disconnect()

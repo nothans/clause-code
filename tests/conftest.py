@@ -10,6 +10,12 @@ from rich.console import Console
 from clause_code.utils.config import ConfigManager
 
 
+@pytest.fixture(autouse=True)
+def no_env_api_key(monkeypatch):
+    """Keep a real ANTHROPIC_API_KEY in the environment out of the tests."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+
 @pytest.fixture
 def temp_dir():
     """Create a temporary directory for testing."""
@@ -35,6 +41,12 @@ def config_manager(config_dir):
 def mock_console():
     """Create a mock Rich console."""
     return Mock(spec=Console)
+
+
+@pytest.fixture
+def recording_console():
+    """A real Rich console that records plain-text output."""
+    return Console(record=True, width=120, force_terminal=False, color_system=None)
 
 
 @pytest.fixture
