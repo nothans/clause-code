@@ -180,7 +180,10 @@ class TurnRenderer:
                 self.start()
 
     def _tool_line(self, block: ToolUseBlock, subagent: bool) -> Text:
-        line = Text("  ↳ " if subagent else "", style="dim")
+        # Subagent lines are dimmed as a whole; a base style on Text applies to every span
+        line = Text(style="dim" if subagent else "")
+        if subagent:
+            line.append("  ↳ ")
         line.append(self.theme.get_tool_label(block.name), style="cyan")
         summary = summarize_tool_input(block.name, block.input, self.get_root())
         if summary:

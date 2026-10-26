@@ -34,6 +34,8 @@ WRITE_TOOLS_MATCHER = "|".join(WRITE_TOOLS)
 NEVER_ALWAYS = {"Bash"}
 
 PREVIEW_LINES = 40
+# Wrap rather than crop, so nothing the user approves is hidden off the edge
+PREVIEW_STYLE = {"theme": "ansi_dark", "word_wrap": True}
 
 AskFn = Callable[[str], Awaitable[str]]
 
@@ -141,22 +143,24 @@ def render_request(
 
     if tool_name == "Edit":
         diff = _diff(path, tool_input.get("old_string", ""), tool_input.get("new_string", ""))
-        parts.append(Syntax(_truncate(diff), "diff", theme="ansi_dark"))
+        parts.append(Syntax(_truncate(diff), "diff", **PREVIEW_STYLE))
     elif tool_name == "MultiEdit":
         diffs = [
             _diff(path, edit.get("old_string", ""), edit.get("new_string", ""))
             for edit in tool_input.get("edits", [])
         ]
-        parts.append(Syntax(_truncate("\n".join(diffs)), "diff", theme="ansi_dark"))
+        parts.append(Syntax(_truncate("\n".join(diffs)), "diff", **PREVIEW_STYLE))
     elif tool_name == "Write":
         content = tool_input.get("content", "")
         parts.append(Text(f"{path} ({len(content.splitlines())} lines)", style="bold"))
         lexer = Syntax.guess_lexer(path, code=content)
-        parts.append(Syntax(_truncate(content), lexer, theme="ansi_dark", line_numbers=True))
+        parts.append(
+            Syntax(_truncate(content.rstrip("\n")), lexer, line_numbers=True, **PREVIEW_STYLE)
+        )
     elif tool_name == "Bash":
         if tool_input.get("description"):
             parts.append(Text(tool_input["description"], style="dim"))
-        parts.append(Syntax(tool_input.get("command", ""), "bash", theme="ansi_dark"))
+        parts.append(Syntax(tool_input.get("command", ""), "bash", **PREVIEW_STYLE))
     else:
         parts.append(Text(_truncate(json.dumps(tool_input, indent=2))))
 

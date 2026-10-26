@@ -99,6 +99,23 @@ class TestTurnRenderer:
 
         assert "→ Edit src/app.py" in text
 
+    def test_tool_line_not_dimmed(self, renderer, project_folder):
+        """Regression: a dim base style made every top-level tool line dim."""
+        block = ToolUseBlock(id="t", name="Read", input={"file_path": str(project_folder / "a.py")})
+
+        line = renderer._tool_line(block, subagent=False)
+
+        assert line.style == ""
+        assert [span.style for span in line.spans] == ["cyan", "bold"]
+
+    def test_subagent_tool_line_dimmed(self, renderer, project_folder):
+        block = ToolUseBlock(id="t", name="Read", input={"file_path": str(project_folder / "a.py")})
+
+        line = renderer._tool_line(block, subagent=True)
+
+        assert line.style == "dim"
+        assert line.plain.startswith("  ↳ ")
+
     def test_festive_tool_label(self, recording_console, project_folder):
         renderer = TurnRenderer(recording_console, FestiveTheme, lambda: project_folder)
         block = ToolUseBlock(id="t", name="Bash", input={"command": "pytest -q"})
