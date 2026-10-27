@@ -43,9 +43,6 @@ ENV/
 htmlcov/
 .tox/
 
-# uv
-uv.lock
-
 # Clause Code specific
 .clause-code/
 *.log

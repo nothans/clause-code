@@ -1,224 +1,238 @@
-"""Tests for Claude agent integration."""
+"""Tests for the Claude Agent SDK integration."""
+
+from unittest.mock import create_autospec
 
 import pytest
-from unittest.mock import AsyncMock, Mock, patch
+from claude_agent_sdk import ClaudeSDKClient, CLIConnectionError, ResultMessage
 
-from clause_code.agent import ClaudeAgent
+from clause_code.agent import DEFAULT_MODEL, MODELS, ClauseAgent, build_persona
+from clause_code.permissions import ToolApprover
 from clause_code.theme import FestiveTheme, GrinchTheme
 
 
-class TestClaudeAgent:
-    """Test cases for ClaudeAgent class."""
+def result_message(**overrides):
+    fields = dict(
+        subtype="success",
+        duration_ms=1200,
+        duration_api_ms=1000,
+        is_error=False,
+        num_turns=1,
+        session_id="session-1",
+        total_cost_usd=0.01,
+    )
+    fields.update(overrides)
+    return ResultMessage(**fields)
 
-    def test_init_default_params(self, api_key, mock_console):
-        """Test agent initialization with default parameters."""
-        agent = ClaudeAgent(api_key=api_key, console=mock_console)
 
-        assert agent.model == "sonnet"
-        assert agent.festive_mode is True
-        assert agent.theme == FestiveTheme
-        assert agent.conversation_history == []
+class FakeClientFactory:
+    """Builds autospecced SDK clients and remembers the options each got."""
 
-    def test_init_custom_model(self, api_key, mock_console):
-        """Test agent initialization with custom model."""
-        agent = ClaudeAgent(
-            api_key=api_key,
-            model="haiku",
-            festive_mode=False,
-            console=mock_console
-        )
+    def __init__(self, messages=None):
+        self.messages = messages or [result_message()]
+        self.clients = []
+        self.options = []
+
+    def __call__(self, options):
+        client = create_autospec(ClaudeSDKClient, instance=True)
+
+        async def receive_response():
+            for message in self.messages:
+                yield message
+
+        client.receive_response.side_effect = receive_response
+        self.clients.append(client)
+        self.options.append(options)
+        return client
+
+
+@pytest.fixture
+def factory():
+    return FakeClientFactory()
+
+
+@pytest.fixture
+def agent(project_folder, factory):
+    return ClauseAgent(project_folder, client_factory=factory)
+
+
+class TestModels:
+    """The model table."""
+
+    def test_default_is_opus(self):
+        assert DEFAULT_MODEL == "opus"
+        assert MODELS["opus"]["id"] == "claude-opus-5-5"
+
+    def test_current_model_ids(self):
+        assert MODELS["sonnet"]["id"] == "claude-sonnet-5-5"
+        assert MODELS["haiku"]["id"] == "claude-haiku-5-5"
+
+    def test_unknown_model_rejected(self, project_folder):
+        with pytest.raises(ValueError):
+            ClauseAgent(project_folder, model="gpt")
+
+
+class TestOptions:
+    """SDK options built for each session."""
+
+    def test_model_and_folder(self, agent, project_folder):
+        options = agent.build_options()
+
+        assert options.model == "claude-opus-5-5"
+        assert options.cwd == str(project_folder.resolve())
+        assert options.effort == "high"
+
+    def test_no_sampling_parameters(self, agent):
+        """temperature/top_p/top_k are rejected by current models and API versions."""
+        options = agent.build_options()
+
+        assert not hasattr(options, "temperature")
+        assert "temperature" not in options.extra_args
+
+    def test_system_prompt_extends_claude_code(self, agent, project_folder):
+        prompt = agent.build_options().system_prompt
+
+        assert prompt["type"] == "preset"
+        assert prompt["preset"] == "claude_code"
+        assert "Clause Code" in prompt["append"]
+        assert str(project_folder.resolve()) in prompt["append"]
+
+    def test_persona_follows_festive_mode(self, project_folder):
+        assert "holiday cheer" in build_persona(project_folder, festive=True)
+        assert "minimal mode" in build_persona(project_folder, festive=False)
+
+    def test_permissions(self, project_folder, factory):
+        approver = ToolApprover(None, None, lambda: project_folder)
+        agent = ClauseAgent(project_folder, approver=approver, client_factory=factory)
+
+        options = agent.build_options()
+
+        assert options.permission_mode == "default"
+        assert options.can_use_tool is approver
+        assert options.allowed_tools == []
+        assert "AskUserQuestion" in options.disallowed_tools
+        matcher = options.hooks["PreToolUse"][0]
+        assert "Write" in matcher.matcher and "Edit" in matcher.matcher
+
+    def test_project_settings_only(self, agent):
+        assert agent.build_options().setting_sources == ["project"]
+
+    def test_api_key_passed_to_runtime(self, project_folder, factory, api_key):
+        agent = ClauseAgent(project_folder, api_key=api_key, client_factory=factory)
+
+        env = agent.build_options().env
+
+        assert env["ANTHROPIC_API_KEY"] == api_key
+        assert env["CLAUDE_AGENT_SDK_CLIENT_APP"].startswith("clause-code/")
+
+    def test_no_api_key_uses_environment(self, agent):
+        assert "ANTHROPIC_API_KEY" not in agent.build_options().env
+
+    def test_streams_partial_messages(self, agent):
+        assert agent.build_options().include_partial_messages is True
+
+
+class TestSession:
+    """Session lifecycle."""
+
+    async def test_context_manager_connects_and_disconnects(self, agent, factory):
+        async with agent:
+            assert agent.connected
+            factory.clients[0].connect.assert_awaited_once()
+
+        factory.clients[0].disconnect.assert_awaited_once()
+        assert not agent.connected
+
+    async def test_send_streams_until_result(self, agent, factory):
+        async with agent:
+            messages = [m async for m in agent.send("Build a sleigh")]
+
+        factory.clients[0].query.assert_awaited_once_with("Build a sleigh")
+        assert isinstance(messages[-1], ResultMessage)
+
+    async def test_send_connects_lazily(self, agent, factory):
+        [m async for m in agent.send("hi")]
+
+        assert agent.connected
+        assert len(factory.clients) == 1
+
+    async def test_new_session_reconnects_and_resets_approvals(self, project_folder, factory):
+        approver = ToolApprover(None, None, lambda: project_folder)
+        approver.always_allowed.add("Edit")
+        agent = ClauseAgent(project_folder, approver=approver, client_factory=factory)
+
+        async with agent:
+            await agent.new_session()
+
+        assert len(factory.clients) == 2
+        factory.clients[0].disconnect.assert_awaited_once()
+        assert approver.always_allowed == set()
+
+    async def test_set_model_keeps_session(self, agent, factory):
+        async with agent:
+            await agent.set_model("haiku")
 
         assert agent.model == "haiku"
-        assert agent.festive_mode is False
-        assert agent.theme == GrinchTheme
+        assert len(factory.clients) == 1
+        factory.clients[0].set_model.assert_awaited_once_with("claude-haiku-5-5")
 
-    def test_get_model_id(self, api_key, mock_console):
-        """Test getting model ID for different models."""
-        agent = ClaudeAgent(api_key=api_key, console=mock_console)
+    async def test_set_model_failure_keeps_current_model(self, agent, factory):
+        """If the runtime rejects the switch, the agent still reports the old model."""
+        async with agent:
+            factory.clients[0].set_model.side_effect = CLIConnectionError("auth failed")
+            with pytest.raises(CLIConnectionError):
+                await agent.set_model("haiku")
 
-        # Test default sonnet
-        assert agent.get_model_id() == "claude-sonnet-4-5-20250929"
-
-        # Test haiku
-        agent.set_model("haiku")
-        assert agent.get_model_id() == "claude-haiku-4-5-20251001"
-
-        # Test opus
-        agent.set_model("opus")
-        assert agent.get_model_id() == "claude-opus-4-1-20250805"
-
-    def test_get_model_info(self, api_key, mock_console):
-        """Test getting model information."""
-        agent = ClaudeAgent(api_key=api_key, console=mock_console)
-
-        info = agent.get_model_info()
-        assert "id" in info
-        assert "name" in info
-        assert "emoji" in info
-        assert "description" in info
-        assert "max_tokens" in info
-        assert info["id"] == "claude-sonnet-4-5-20250929"
-        assert info["max_tokens"] == 64000
-
-    def test_set_model_valid(self, api_key, mock_console):
-        """Test setting a valid model."""
-        agent = ClaudeAgent(api_key=api_key, console=mock_console)
-
-        agent.set_model("haiku")
-        assert agent.model == "haiku"
-
-        agent.set_model("opus")
         assert agent.model == "opus"
 
-    def test_set_model_invalid(self, api_key, mock_console):
-        """Test setting an invalid model raises error."""
-        agent = ClaudeAgent(api_key=api_key, console=mock_console)
+    async def test_auto_accept_failure_keeps_setting(self, agent, factory):
+        async with agent:
+            factory.clients[0].set_permission_mode.side_effect = CLIConnectionError("gone")
+            with pytest.raises(CLIConnectionError):
+                await agent.set_auto_accept(True)
 
-        with pytest.raises(ValueError, match="Unknown model"):
-            agent.set_model("invalid_model")
+        assert agent.auto_accept_edits is False
 
-    def test_set_festive_mode(self, api_key, mock_console):
-        """Test toggling festive mode."""
-        agent = ClaudeAgent(api_key=api_key, console=mock_console)
+    async def test_set_model_invalid(self, agent):
+        with pytest.raises(ValueError):
+            await agent.set_model("invalid")
 
-        # Start in festive mode
-        assert agent.festive_mode is True
-        assert agent.theme == FestiveTheme
+    async def test_set_project_starts_new_session(self, agent, factory, temp_dir):
+        other = temp_dir / "other"
+        other.mkdir()
 
-        # Disable festive mode
+        async with agent:
+            await agent.set_project(other)
+
+        assert agent.project_folder == other.resolve()
+        assert factory.options[-1].cwd == str(other.resolve())
+        assert len(factory.clients) == 2
+
+    async def test_set_api_key_starts_new_session(self, agent, factory, api_key):
+        async with agent:
+            await agent.set_api_key(api_key)
+
+        assert factory.options[-1].env["ANTHROPIC_API_KEY"] == api_key
+
+    async def test_auto_accept(self, agent, factory):
+        async with agent:
+            await agent.set_auto_accept(True)
+            factory.clients[0].set_permission_mode.assert_awaited_once_with("acceptEdits")
+            await agent.set_auto_accept(False)
+            factory.clients[0].set_permission_mode.assert_awaited_with("default")
+
+    async def test_interrupt(self, agent, factory):
+        async with agent:
+            await agent.interrupt()
+
+        factory.clients[0].interrupt.assert_awaited_once()
+
+    async def test_interrupt_without_session_is_noop(self, agent):
+        await agent.interrupt()
+
+    def test_festive_mode_switches_theme(self, agent):
+        assert agent.theme is FestiveTheme
+
         agent.set_festive_mode(False)
-        assert agent.festive_mode is False
-        assert agent.theme == GrinchTheme
 
-        # Re-enable festive mode
-        agent.set_festive_mode(True)
-        assert agent.festive_mode is True
-        assert agent.theme == FestiveTheme
-
-    def test_clear_history(self, api_key, mock_console):
-        """Test clearing conversation history."""
-        agent = ClaudeAgent(api_key=api_key, console=mock_console)
-
-        # Add some fake history
-        agent.conversation_history = [
-            {"role": "user", "content": "Hello"},
-            {"role": "assistant", "content": "Hi there!"}
-        ]
-
-        assert len(agent.conversation_history) == 2
-
-        # Clear history
-        agent.clear_history()
-        assert len(agent.conversation_history) == 0
-
-    @pytest.mark.asyncio
-    async def test_chat_adds_to_history(self, api_key, mock_console):
-        """Test that chat messages are added to conversation history."""
-        agent = ClaudeAgent(api_key=api_key, console=mock_console)
-
-        # Mock the Anthropic client
-        mock_stream = AsyncMock()
-        mock_stream.text_stream = self._async_generator(["Hello", " there", "!"])
-        mock_stream.__aenter__ = AsyncMock(return_value=mock_stream)
-        mock_stream.__aexit__ = AsyncMock(return_value=None)
-
-        with patch.object(agent.client.messages, 'stream', return_value=mock_stream):
-            response = []
-            async for chunk in agent.chat("Test message"):
-                response.append(chunk)
-
-        # Check history
-        assert len(agent.conversation_history) == 2
-        assert agent.conversation_history[0]["role"] == "user"
-        assert agent.conversation_history[0]["content"] == "Test message"
-        assert agent.conversation_history[1]["role"] == "assistant"
-        assert agent.conversation_history[1]["content"] == "Hello there!"
-
-    @pytest.mark.asyncio
-    async def test_chat_with_project_folder(self, api_key, mock_console, project_folder):
-        """Test chat with project folder context."""
-        agent = ClaudeAgent(api_key=api_key, console=mock_console)
-
-        mock_stream = AsyncMock()
-        mock_stream.text_stream = self._async_generator(["Response"])
-        mock_stream.__aenter__ = AsyncMock(return_value=mock_stream)
-        mock_stream.__aexit__ = AsyncMock(return_value=None)
-
-        with patch.object(agent.client.messages, 'stream', return_value=mock_stream) as mock:
-            async for _ in agent.chat("Test", project_folder=str(project_folder)):
-                pass
-
-            # Check that stream was called with project folder in system prompt
-            call_kwargs = mock.call_args[1]
-            assert str(project_folder) in call_kwargs["system"]
-
-    @pytest.mark.asyncio
-    async def test_chat_error_handling(self, api_key, mock_console):
-        """Test that chat handles errors gracefully."""
-        agent = ClaudeAgent(api_key=api_key, console=mock_console)
-
-        # Mock an error
-        with patch.object(agent.client.messages, 'stream', side_effect=Exception("API Error")):
-            response = []
-            async for chunk in agent.chat("Test message"):
-                response.append(chunk)
-
-            # Should return empty string on error
-            assert response == [""]
-            # Should print error message
-            assert mock_console.print.called
-
-    @pytest.mark.asyncio
-    async def test_generate_code(self, api_key, mock_console):
-        """Test code generation."""
-        agent = ClaudeAgent(api_key=api_key, console=mock_console)
-
-        # Mock response
-        mock_content = Mock()
-        mock_content.text = "def hello():\n    return 'Hello'"
-        mock_response = Mock()
-        mock_response.content = [mock_content]
-
-        # Use AsyncMock for the create method since it's async
-        with patch.object(agent.client.messages, 'create', new=AsyncMock(return_value=mock_response)):
-            code, explanation = await agent.generate_code("Create a hello function")
-
-            assert "def hello()" in code
-            assert code != ""
-
-    @pytest.mark.asyncio
-    async def test_generate_code_error(self, api_key, mock_console):
-        """Test code generation error handling."""
-        agent = ClaudeAgent(api_key=api_key, console=mock_console)
-
-        with patch.object(agent.client.messages, 'create', side_effect=Exception("API Error")):
-            code, explanation = await agent.generate_code("Create a function")
-
-            assert code == ""
-            assert explanation == ""
-
-    def test_render_code(self, api_key, mock_console):
-        """Test code rendering with syntax highlighting."""
-        agent = ClaudeAgent(api_key=api_key, console=mock_console)
-
-        code = "def hello():\n    return 'Hello'"
-        agent.render_code(code, language="python", title="Test Code")
-
-        # Should have called console.print
-        assert mock_console.print.called
-
-    def test_render_code_festive_title(self, api_key, mock_console):
-        """Test code rendering uses festive title in festive mode."""
-        agent = ClaudeAgent(api_key=api_key, festive_mode=True, console=mock_console)
-
-        code = "console.log('Hello')"
-        agent.render_code(code, language="javascript")
-
-        # Should have called console.print
-        assert mock_console.print.called
-
-    @staticmethod
-    async def _async_generator(items):
-        """Helper to create an async generator for testing."""
-        for item in items:
-            yield item
+        assert agent.theme is GrinchTheme
+        assert "minimal mode" in agent.build_options().system_prompt["append"]

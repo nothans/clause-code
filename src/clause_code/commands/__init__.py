@@ -3,6 +3,7 @@
 from .base import Command
 from .config import (
     AdventCommand,
+    AutoAcceptCommand,
     ClearCommand,
     GrinchCommand,
     HelpCommand,
@@ -21,5 +22,6 @@ __all__ = [
     "GrinchCommand",
     "ClearCommand",
     "AdventCommand",
+    "AutoAcceptCommand",
     "HelpCommand",
 ]

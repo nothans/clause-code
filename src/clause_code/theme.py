@@ -52,6 +52,23 @@ class FestiveTheme:
         "🎄 Inspecting the code under the tree...",
     ]
 
+    # How each tool call is announced while Claude works
+    TOOL_LABELS = {
+        "Read": "📜 Reading",
+        "Write": "🎁 Wrapping up",
+        "Edit": "✂️ Re-wrapping",
+        "MultiEdit": "✂️ Re-wrapping",
+        "NotebookEdit": "✂️ Re-wrapping",
+        "Bash": "🔔 Running",
+        "Grep": "🔍 Checking it twice:",
+        "Glob": "🗺️ Mapping",
+        "WebFetch": "🦌 Fetching",
+        "WebSearch": "🌟 Searching the skies for",
+        "Agent": "🧝 Sending an elf to",
+        "Task": "🧝 Sending an elf to",
+        "TodoWrite": "📋 Updating the list",
+    }
+
     WELCOME_TREE = """
            🌟
           /|\\
@@ -111,6 +128,18 @@ class FestiveTheme:
         """
         return random.choice(cls.ANALYSIS_MESSAGES)
 
+    @classmethod
+    def get_tool_label(cls, tool_name: str) -> str:
+        """Get the festive label for a tool call.
+
+        Args:
+            tool_name: Name of the tool Claude is using
+
+        Returns:
+            Label shown before the tool's target
+        """
+        return cls.TOOL_LABELS.get(tool_name, f"🛠️ Using {tool_name}")
+
 
 class GrinchTheme:
     """Minimal theme for those who prefer less festivity."""
@@ -150,3 +179,15 @@ class GrinchTheme:
             Simple analysis message
         """
         return "⚙️ Analyzing..."
+
+    @staticmethod
+    def get_tool_label(tool_name: str) -> str:
+        """Get minimal tool label.
+
+        Args:
+            tool_name: Name of the tool Claude is using
+
+        Returns:
+            The tool name
+        """
+        return f"→ {tool_name}"

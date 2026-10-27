@@ -6,8 +6,8 @@
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
-[![Anthropic SDK](https://img.shields.io/badge/Anthropic-Claude-orange.svg)](https://www.anthropic.com)
-[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![Claude Agent SDK](https://img.shields.io/badge/Claude-Agent%20SDK-orange.svg)](https://code.claude.com/docs/en/agent-sdk)
+[![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 
 </div>
 
@@ -15,16 +15,17 @@
 
 ## 🎁 What is Clause Code?
 
-Clause Code is an interactive terminal-based AI coding assistant powered by Anthropic's Claude. It combines powerful AI capabilities with delightful holiday theming to make your coding sessions more enjoyable and productive.
+Clause Code is an interactive terminal coding agent built on the [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk). Claude can read your project, edit files, and run commands, and you approve every edit and shell command. All of it comes wrapped in holiday theming.
 
 **Key Features:**
-- 💬 Interactive chat interface with Claude's latest models (Sonnet 4.5, Haiku 4.5, Opus 4.1)
-- 🎨 Beautiful terminal UI with syntax highlighting and festive animations
-- 📝 Automatic code extraction and file writing
-- 🎄 Holiday-themed status messages and ASCII art
+- 🛠️ A real coding agent: Claude reads, searches, edits, and runs code in your project folder
+- 🔐 You approve every file edit and shell command, with a diff or command preview first
+- 🧱 File writes outside the project folder are always blocked
+- 💬 Claude Opus 5.5 by default, with Sonnet 5.5 and Haiku 5.5 a `/model` away
+- 🎨 Streaming Markdown output with syntax highlighting and festive status messages
+- ⏸️ Ctrl+C interrupts Claude mid-turn without quitting
 - 📚 Command history with auto-completion
 - 🎅 Daily December coding challenges (advent calendar)
-- ⚙️ Flexible configuration with multiple Claude models
 
 ## 📸 Screenshot
 
@@ -32,7 +33,7 @@ Clause Code is an interactive terminal-based AI coding assistant powered by Anth
 
 ![Clause Code in action](docs/images/clause-code-screenshot.png)
 
-*Clause Code's festive terminal interface with Claude Sonnet 4.5*
+*Clause Code's festive terminal interface*
 
 </div>
 
@@ -43,12 +44,14 @@ Clause Code is an interactive terminal-based AI coding assistant powered by Anth
 - Python 3.10 or higher
 - An [Anthropic API key](https://console.anthropic.com/account/keys)
 
+The Claude Agent SDK ships with its own Claude Code runtime, so there is nothing else to install.
+
 ### Installation
 
 #### Option 1: Using uv (Recommended)
 
 ```bash
-git clone https://github.com/yourusername/clause-code.git
+git clone https://github.com/nothans/clause-code.git
 cd clause-code
 uv sync
 uv run clause-code
@@ -57,7 +60,7 @@ uv run clause-code
 #### Option 2: Using pip
 
 ```bash
-git clone https://github.com/yourusername/clause-code.git
+git clone https://github.com/nothans/clause-code.git
 cd clause-code
 
 # Create and activate virtual environment
@@ -73,42 +76,49 @@ clause-code
 
 ### First Run Setup
 
-On first launch, Clause Code will guide you through a quick setup:
+On first launch, Clause Code asks for:
 
-1. Enter your Anthropic API key (or set `ANTHROPIC_API_KEY` environment variable)
-2. Choose your preferred Claude model
-3. Set your project folder (optional)
-4. Select festive theme (Santa mode or Grinch mode)
+1. Your Anthropic API key (skipped if `ANTHROPIC_API_KEY` is set)
+2. Festive mode or minimal mode
 
-You're ready to code with holiday cheer!
+Clause Code works in the folder you launch it from. Use `--project` for one session, or `/project` to switch and remember a folder for next time.
+
+```bash
+clause-code                          # work in the current folder
+clause-code --project ~/code/sleigh  # work in another folder
+clause-code --model sonnet           # use a different model for this session
+```
 
 ## 📖 Usage
 
-### Basic Chat
+### Just ask
 
-Simply type your questions or coding requests:
-
-```
-🎄 You: Help me write a Python function to calculate fibonacci numbers
-
-🎅 Sleighing...
-
-Here's a festive fibonacci implementation...
-[Generated code with syntax highlighting]
-```
-
-### Automatic File Writing
-
-Clause Code automatically extracts and writes files from Claude's responses:
+Describe what you want. Claude explores the project, makes changes, and runs commands, announcing each step as it goes:
 
 ```
-🎄 You: Create a new file hello.py with a hello world function
+🎅 > Add a --verbose flag to the CLI and a test for it
 
-🎄 Jingling...
-
-**File: hello.py**
-[Code is automatically written to your project folder]
+📜 Reading src/cli.py
+🔍 Checking it twice: def main
+✂️ Re-wrapping src/cli.py
+╭─ Claude wants to edit src/cli.py ─────────────────────────╮
+│ --- a/src/cli.py                                          │
+│ +++ b/src/cli.py                                          │
+│ +    parser.add_argument("--verbose", action="store_true")│
+╰───────────────────────────────────────────────────────────╯
+Allow? [y]es / [a]lways for this session / [n]o: y
+🔔 Running pytest -q
+...
+✨ Sprinkled some magic dust on your solution!  18.2s · $0.0412
 ```
+
+### Approvals and safety
+
+- **Reads and searches** inside the project run without asking.
+- **File edits and writes** show a diff or preview first. Answer `a` to allow that tool for the rest of the session, or turn on `/autoaccept`.
+- **Shell commands** always ask, and can't be approved for a whole session.
+- **Writes outside the project folder** are blocked by a hook, even with `/autoaccept` on.
+- Declining an action tells Claude to ask you how to proceed instead.
 
 ### Slash Commands
 
@@ -116,32 +126,31 @@ Clause Code automatically extracts and writes files from Claude's responses:
 |---------|-------------|
 | `/help` | Show all available commands |
 | `/setkey` | Configure or update your Anthropic API key |
-| `/model` | Switch between Claude models (Sonnet, Haiku, Opus) |
-| `/project` | Set your working directory |
+| `/model` | Switch between Claude models (Opus, Sonnet, Haiku) |
+| `/project` | Set your working folder (starts a new conversation) |
+| `/autoaccept` | Apply file edits without asking (`on`/`off`) |
 | `/santa` | Enable festive mode with maximum holiday cheer |
 | `/grinch` | Switch to minimal mode (less festive) |
 | `/advent` | Get daily coding challenges (December only) |
-| `/clear` | Clear conversation history and screen |
+| `/clear` | Clear the screen and start a new conversation |
 | `/exit` or `/quit` | Exit Clause Code |
 
 ## 🎨 Features in Detail
 
-### Multiple Claude Models
+### Claude Models
 
-Choose the right model for your task:
+- **Opus 5.5** (Default): most capable, best for complex coding and agentic work
+- **Sonnet 5.5**: fast and capable for everyday coding
+- **Haiku 5.5**: fastest and cheapest, for quick questions
 
-- **Sonnet 4.5** (Default) - Best for coding, balanced performance and capability
-- **Haiku 4.5** - Fastest responses for quick questions
-- **Opus 4.1** - Most capable for complex reasoning tasks
-
-Switch models anytime with `/model`
+All three have a 1M token context window. Switch anytime with `/model`; the conversation carries over.
 
 ### Festive Theming
 
 Two delightful themes:
 
-- **Santa Mode** - Full holiday cheer with festive messages and animations
-- **Grinch Mode** - Minimal, professional output for when you need focus
+- **Santa Mode**: full holiday cheer in status messages, tool announcements, and Claude's tone
+- **Grinch Mode**: minimal, professional output for when you need focus
 
 Watch Clause Code "think" with festive states:
 - 🎅 Sleighing...
@@ -151,33 +160,31 @@ Watch Clause Code "think" with festive states:
 - ❄️ Crystallizing...
 - And more!
 
+The status messages switch immediately; Claude's own tone follows from the next `/clear`.
+
+### Project instructions
+
+Clause Code loads your project's `CLAUDE.md` and `.claude/settings.json`, so project conventions and permission rules you already use with Claude Code apply here too. Your personal `~/.claude` settings are not loaded.
+
 ### Advent Calendar
 
 Daily coding challenges throughout December:
 
 ```bash
-🎄 You: /advent
+🎅 > /advent
 
-🎅 December 5th Challenge: Binary Tree Decorations
-[Fun coding challenge with holiday twist]
+🎄 Advent Calendar - December 5 🎄
+❄️ Day 5: Build a snowflake pattern generator using ASCII art
 ```
-
-### Smart File Management
-
-Clause Code automatically:
-- Extracts code blocks marked with file paths
-- Creates files in your project directory
-- Preserves file structure and formatting
-- Highlights written files in the output
 
 ## ⚙️ Configuration
 
-Clause Code stores configuration in `~/.clause-code/`:
+Clause Code stores its settings in `~/.clause-code/`:
 
 ```
 ~/.clause-code/
 ├── config.json      # Application settings
-├── .api_key         # Encrypted API key
+├── .api_key         # API key, readable only by you (not encrypted)
 └── history          # Command history
 ```
 
@@ -187,20 +194,21 @@ You can configure via commands or by editing `config.json`:
 
 ```json
 {
-  "model": "claude-sonnet-4-5-20250929",
-  "theme": "festive",
-  "project_folder": "/path/to/your/project",
-  "max_tokens": 64000
+  "default_model": "opus",
+  "festive_mode": true,
+  "project_folder": "/path/to/your/project"
 }
 ```
 
-### Environment Variables
+`project_folder` is used when you launch without `--project`; if it's unset or missing, Clause Code uses the current folder.
 
-Set your API key via environment variable:
+### Environment Variables
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-your-key-here
 ```
+
+A key in the environment takes precedence over the saved key and is never written to disk.
 
 ## 🏗️ Architecture
 
@@ -208,57 +216,47 @@ export ANTHROPIC_API_KEY=sk-ant-your-key-here
 src/clause_code/
 ├── __init__.py
 ├── __main__.py         # Entry point
-├── cli.py              # Main CLI application
-├── agent.py            # Claude SDK integration
+├── _version.py         # Version
+├── cli.py              # Chat loop, command routing, first-run setup
+├── agent.py            # Claude Agent SDK session (models, options, lifecycle)
+├── permissions.py      # Approval prompts and the project-folder write guard
+├── render.py           # Streaming output, tool announcements, errors
 ├── theme.py            # Holiday theming system
 ├── commands/           # Slash command handlers
 │   ├── __init__.py
 │   ├── base.py
 │   └── config.py
-└── utils/              # Utilities
+└── utils/
     ├── __init__.py
-    ├── config.py       # Configuration management
-    └── file_writer.py  # File extraction & writing
+    └── config.py       # Configuration management
 ```
 
 ### Key Components
 
-- **CLI (cli.py)** - Async chat loop, command routing, first-run setup
-- **Agent (agent.py)** - Claude API integration, streaming responses, conversation history
-- **Theme (theme.py)** - Festive messages, ASCII art, status animations
-- **Commands (commands/)** - Slash command implementations
-- **Utils (utils/)** - Configuration management, file operations
+- **Agent (agent.py)**: wraps `ClaudeSDKClient`. It uses Claude Code's system prompt plus the Clause Code persona, and owns session lifecycle, model switching, and permission modes.
+- **Permissions (permissions.py)**: the `can_use_tool` callback that shows previews and asks you, plus a `PreToolUse` hook that blocks writes outside the project.
+- **Renderer (render.py)**: turns SDK messages into terminal output. Text streams as a live preview and is then rendered as Markdown. Model output is never parsed as Rich markup.
+- **CLI (cli.py)**: prompt loop, slash commands, and Ctrl+C handling that interrupts the current turn.
+- **Theme (theme.py)**: festive messages, tool labels, and ASCII art.
 
 ## 🧪 Development
 
 ### Setup Development Environment
 
 ```bash
-# Clone and install with dev dependencies
-git clone https://github.com/yourusername/clause-code.git
+git clone https://github.com/nothans/clause-code.git
 cd clause-code
 uv sync --extra dev
 
 # Run tests
 uv run pytest
 
-# Format code
-uv run black src/
-uv run ruff check src/
+# Lint and format
+uv run ruff check src tests
+uv run ruff format src tests
 ```
 
-### Running Tests
-
-```bash
-# Run all tests
-pytest
-
-# Run with coverage
-pytest --cov=clause_code
-
-# Run specific test file
-pytest tests/test_agent.py
-```
+The tests mock the SDK client with `create_autospec(ClaudeSDKClient)`, so a call that doesn't match the real SDK's signature fails the test instead of passing silently. They make no network calls.
 
 ### Project Structure
 
@@ -266,11 +264,10 @@ pytest tests/test_agent.py
 clause-code/
 ├── src/clause_code/     # Main package
 ├── tests/               # Test suite
-├── demo_project/        # Example projects
+├── docs/images/         # Screenshots
 ├── pyproject.toml       # Project configuration
+├── uv.lock              # Locked dependency versions
 ├── README.md            # This file
-├── PLAN.md              # Technical plan
-├── QUICKSTART.md        # Quick start guide
 └── LICENSE              # MIT License
 ```
 
@@ -278,14 +275,14 @@ clause-code/
 
 Contributions are welcome! Here's how you can help:
 
-1. **Report Bugs** - Open an issue with details
-2. **Suggest Features** - Share your ideas for new commands or features
-3. **Submit PRs** - Fork, create a feature branch, and submit a PR
-4. **Add Festive Content** - More holiday messages, ASCII art, or challenges
+1. **Report Bugs**: open an issue with details
+2. **Suggest Features**: share your ideas for new commands or features
+3. **Submit PRs**: fork, create a feature branch, and submit a PR
+4. **Add Festive Content**: more holiday messages, ASCII art, or challenges
 
 ### Contribution Guidelines
 
-- Follow PEP 8 style guidelines (enforced by Black)
+- Format and lint with ruff (`ruff format`, `ruff check`)
 - Add tests for new features
 - Update documentation for user-facing changes
 - Keep the festive spirit alive!
@@ -294,56 +291,31 @@ Contributions are welcome! Here's how you can help:
 
 ### Core Dependencies
 
-- **anthropic** (>=0.72.0) - Official Anthropic SDK
-- **rich** (>=13.7.0) - Beautiful terminal formatting and syntax highlighting
-- **prompt-toolkit** (>=3.0.43) - Interactive CLI with history and auto-completion
-- **click** (>=8.1.7) - Command-line interface creation
-- **pydantic** (>=2.5.0) - Configuration validation
-- **python-dotenv** (>=1.0.0) - Environment variable management
-- **aiofiles** (>=23.2.1) - Async file operations
+- **claude-agent-sdk**: Claude Code as a library (agent loop, built-in tools, permissions, hooks)
+- **rich**: terminal formatting, Markdown, and syntax highlighting
+- **prompt-toolkit**: interactive input with history and auto-completion
+- **pydantic**: configuration validation
 
 ### Development Dependencies
 
-- **pytest** (>=7.4.0) - Testing framework
-- **pytest-asyncio** (>=0.21.0) - Async test support
-- **black** (>=23.0.0) - Code formatting
-- **ruff** (>=0.1.0) - Fast linting
-
-## 🎯 Use Cases
-
-### Code Generation
-Generate functions, classes, and complete modules with natural language requests.
-
-### Code Review
-Get instant feedback on code quality, potential bugs, and improvement suggestions.
-
-### Debugging
-Paste error messages and get detailed explanations with suggested fixes.
-
-### Learning
-Ask questions about programming concepts, libraries, and best practices.
-
-### Refactoring
-Request code improvements, optimization, and modernization.
-
-### Documentation
-Generate docstrings, comments, and README files.
+- **pytest** / **pytest-asyncio**: testing
+- **ruff**: linting and formatting
 
 ## 📋 Keyboard Shortcuts
 
-- **↑/↓** - Navigate command history
-- **Tab** - Auto-complete slash commands
-- **Ctrl+C** - Cancel current operation
-- **Ctrl+D** - Exit application
+- **↑/↓**: navigate command history
+- **Tab**: auto-complete slash commands
+- **Ctrl+C**: interrupt Claude's current turn (or decline at an approval prompt)
+- **Ctrl+D**: exit application
 
 ## ❓ Troubleshooting
 
-### "API key not found"
+### "Authentication failed"
 
-Make sure you've set your API key:
+Check your API key:
 ```bash
 clause-code
-🎄 You: /setkey
+🎅 > /setkey
 ```
 
 Or set the environment variable:
@@ -351,11 +323,11 @@ Or set the environment variable:
 export ANTHROPIC_API_KEY=sk-ant-your-key-here
 ```
 
-### "Module not found"
+### "Claude Code runtime ... is missing"
 
-Ensure you've installed in editable mode:
+The runtime ships inside the `claude-agent-sdk` wheel. Reinstall it:
 ```bash
-pip install -e .
+pip install --force-reinstall claude-agent-sdk
 ```
 
 ### "Command not found: clause-code"
@@ -365,10 +337,14 @@ Make sure your virtual environment is activated or use:
 python -m clause_code
 ```
 
+### Ctrl+C quits instead of interrupting on Windows
+
+Interrupting a turn uses POSIX signal handling. On Windows, Ctrl+C during a turn exits Clause Code.
+
 ## 🎅 Credits
 
 - **Created by** [Hans Scharler](https://nothans.com)
-- **Powered by** [Anthropic Claude](https://www.anthropic.com)
+- **Powered by** [Anthropic Claude](https://www.anthropic.com) and the Claude Agent SDK
 - **Built with** Python, Rich, and holiday spirit
 
 ---
