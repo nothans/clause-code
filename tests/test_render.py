@@ -101,6 +101,40 @@ class TestTurnRenderer:
 
         assert f"→ Edit {Path('src/app.py')}" in text
 
+    def test_hold_queues_output_and_keeps_spinner_off(self, renderer, project_folder):
+        renderer.start()
+        renderer.hold()
+        renderer.handle(
+            assistant(
+                ToolUseBlock(
+                    id="t", name="Write", input={"file_path": str(project_folder / "b.py")}
+                )
+            )
+        )
+        for event in streamed_text("msg_2", "second ", "reply"):
+            renderer.handle(event)
+
+        assert renderer._status is None and renderer._live is None
+        assert "b.py" not in renderer.console.export_text(clear=False)
+
+        renderer.release()
+        renderer.finish()
+        text = renderer.console.export_text()
+
+        assert text.index("b.py") < text.index("second reply")
+
+    def test_finish_prints_output_queued_by_an_unanswered_prompt(self, renderer, project_folder):
+        renderer.hold()
+        renderer.handle(
+            assistant(
+                ToolUseBlock(id="t", name="Read", input={"file_path": str(project_folder / "a.py")})
+            )
+        )
+
+        renderer.finish()
+
+        assert "a.py" in renderer.console.export_text()
+
     def test_tool_line_not_dimmed(self, renderer, project_folder):
         """Regression: a dim base style made every top-level tool line dim."""
         block = ToolUseBlock(id="t", name="Read", input={"file_path": str(project_folder / "a.py")})

@@ -7,7 +7,7 @@ import signal
 from unittest.mock import AsyncMock, create_autospec
 
 import pytest
-from claude_agent_sdk import CLIConnectionError, ResultMessage
+from claude_agent_sdk import AssistantMessage, CLIConnectionError, ResultMessage, ToolUseBlock
 
 from clause_code.agent import ClauseAgent
 from clause_code.cli import ClauseCodeCLI, build_parser
@@ -148,6 +148,34 @@ class TestRunTurn:
 
         assert cli.approver.before_prompt is None
         assert cli.approver.after_prompt is None
+
+    async def test_output_waits_while_a_prompt_is_open(
+        self, cli, recording_console, project_folder
+    ):
+        """Regression: a parallel tool call printed over an open approval prompt and restarted
+        the spinner under the user's typing."""
+        printed_during_prompt = []
+
+        async def send(prompt):
+            cli.approver.before_prompt()  # the first tool's approval prompt is open
+            yield AssistantMessage(
+                content=[
+                    ToolUseBlock(
+                        id="t2", name="Write", input={"file_path": str(project_folder / "b.py")}
+                    )
+                ],
+                model="claude-opus-5-5",
+            )
+            printed_during_prompt.append("b.py" in recording_console.export_text(clear=False))
+            cli.approver.after_prompt()  # the user answered
+            yield result()
+
+        cli.agent.send.side_effect = send
+
+        await cli.run_turn("hello")
+
+        assert printed_during_prompt == [False]
+        assert "b.py" in recording_console.export_text()
 
     @pytest.mark.skipif(os.name == "nt", reason="loop signal handlers are POSIX-only")
     async def test_ctrl_c_interrupts_turn_instead_of_exiting(self, cli, recording_console):

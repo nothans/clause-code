@@ -209,8 +209,8 @@ class ClauseCodeCLI:
     async def run_turn(self, prompt: str) -> None:
         """Send a prompt and render Claude's work until the turn ends."""
         renderer = TurnRenderer(self.console, self.agent.theme, lambda: self.agent.project_folder)
-        self.approver.before_prompt = renderer.pause
-        self.approver.after_prompt = renderer.start
+        self.approver.before_prompt = renderer.hold
+        self.approver.after_prompt = renderer.release
         loop = asyncio.get_running_loop()
         interrupting = False
 

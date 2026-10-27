@@ -79,11 +79,16 @@ class TurnRenderer:
         self._buffer = ""
         self._streamed_ids: set[str] = set()
         self._api_error_shown = False
+        # While an approval prompt is open, output is queued and the spinner stays off
+        self._held = False
+        self._deferred: list = []
 
     # Spinner and live preview. Rich allows one live display at a time.
 
     def start(self) -> None:
         """Show the thinking spinner."""
+        if self._held:
+            return
         if self._status is None and self._live is None:
             self._status = self.console.status(
                 Text(self.theme.get_thinking_state(), style="italic green")
@@ -97,9 +102,36 @@ class TurnRenderer:
             self._status.stop()
             self._status = None
 
+    def hold(self) -> None:
+        """Keep the prompt line clear while the user is asked something.
+
+        Parallel tool calls keep streaming while the first one waits for approval;
+        their output is queued until release() instead of printing over the prompt.
+        """
+        self.pause()
+        self._held = True
+
+    def release(self) -> None:
+        """Print what arrived during the prompt and resume the spinner."""
+        self._held = False
+        for renderable in self._deferred:
+            self.console.print(renderable)
+        self._deferred.clear()
+        self.start()
+
     def finish(self) -> None:
         """Clean up at the end of a turn."""
+        self._held = False
         self.pause()
+        for renderable in self._deferred:
+            self.console.print(renderable)
+        self._deferred.clear()
+
+    def _print(self, renderable) -> None:
+        if self._held:
+            self._deferred.append(renderable)
+        else:
+            self.console.print(renderable)
 
     def _preview(self) -> Text:
         # While streaming, show the tail of the text; the full reply is printed
@@ -109,6 +141,9 @@ class TurnRenderer:
         return Text(tail, style="dim")
 
     def _append_text(self, text: str) -> None:
+        if self._held:
+            self._buffer += text
+            return
         if self._status is not None:
             self._status.stop()
             self._status = None
@@ -126,7 +161,7 @@ class TurnRenderer:
             self._live.stop()
             self._live = None
         if self._buffer.strip():
-            self.console.print(Markdown(self._buffer))
+            self._print(Markdown(self._buffer))
         self._buffer = ""
 
     # Messages
@@ -160,7 +195,7 @@ class TurnRenderer:
     def _handle_assistant(self, message: AssistantMessage) -> None:
         if message.error:
             self.pause()
-            self.console.print(
+            self._print(
                 Text(API_ERRORS.get(message.error, self.theme.get_error_message()), style="yellow")
             )
             self._api_error_shown = True
@@ -172,11 +207,11 @@ class TurnRenderer:
                 if message.message_id in self._streamed_ids:
                     continue  # Already shown from the stream
                 self.pause()
-                self.console.print(Markdown(block.text))
+                self._print(Markdown(block.text))
                 self.start()
             elif isinstance(block, ToolUseBlock):
                 self.pause()
-                self.console.print(self._tool_line(block, subagent))
+                self._print(self._tool_line(block, subagent))
                 self.start()
 
     def _tool_line(self, block: ToolUseBlock, subagent: bool) -> Text:
