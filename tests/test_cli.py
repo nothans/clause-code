@@ -68,9 +68,10 @@ class TestResolveProjectFolder:
         self, cli, config_manager, temp_dir, monkeypatch
     ):
         config_manager.set_project_folder(str(temp_dir / "gone"))
-        monkeypatch.chdir(temp_dir)
-
-        assert cli.resolve_project_folder(None) == temp_dir
+        # Leave temp_dir before its fixture deletes it; Windows can't remove the working directory
+        with monkeypatch.context() as m:
+            m.chdir(temp_dir)
+            assert cli.resolve_project_folder(None) == temp_dir
 
 
 class TestHandleCommand:

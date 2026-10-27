@@ -1,5 +1,7 @@
 """Tests for rendering SDK messages."""
 
+from pathlib import Path
+
 import pytest
 from claude_agent_sdk import AssistantMessage, ResultMessage, StreamEvent, TextBlock, ToolUseBlock
 
@@ -97,7 +99,7 @@ class TestTurnRenderer:
 
         text = run(renderer, [assistant(block)])
 
-        assert "→ Edit src/app.py" in text
+        assert f"→ Edit {Path('src/app.py')}" in text
 
     def test_tool_line_not_dimmed(self, renderer, project_folder):
         """Regression: a dim base style made every top-level tool line dim."""

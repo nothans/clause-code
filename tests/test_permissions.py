@@ -45,7 +45,10 @@ class TestIsWithin:
     def test_symlink_escape(self, project_folder, temp_dir):
         outside = temp_dir / "outside"
         outside.mkdir()
-        (project_folder / "link").symlink_to(outside)
+        try:
+            (project_folder / "link").symlink_to(outside)
+        except OSError:
+            pytest.skip("creating symlinks needs Developer Mode or admin rights on Windows")
 
         assert not is_within(project_folder / "link" / "file.txt", project_folder)
 
