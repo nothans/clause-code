@@ -4,10 +4,15 @@ Clause Code keeps its settings in `~/.clause-code/`.
 
 ```text
 ~/.clause-code/
-├── config.json   # settings
-├── .api_key      # your API key, readable only by you (not encrypted)
-└── history       # your earlier messages, for the Up and Down keys
+├── config.json           # settings
+├── .api_key              # your API key, not encrypted
+├── history               # your earlier messages, for the Up and Down keys
+└── runtime-launcher.sh   # macOS and Linux only: starts the Claude Code runtime
 ```
+
+On macOS and Linux, `.api_key` is readable only by you (mode 600).
+On Windows, it has the permissions of your user folder.
+`runtime-launcher.sh` keeps the terminal's Ctrl+C away from the runtime; see [How it works](how-it-works.md#ctrlc).
 
 ## config.json
 
@@ -40,6 +45,21 @@ Commands change these settings, and you can edit the file by hand:
 | `BLUESKY_APP_PASSWORD` | A Bluesky app password, for setting the CheerLights color. Never written to disk. |
 | `BLUESKY_SERVICE` | Your Bluesky server, when your account is not on `bsky.social`. |
 | `CLAUDE_CONFIG_DIR` | Where the Claude Code runtime keeps its own files, such as conversations and plans (`~/.claude` by default). |
+| `CLAUSE_CODE_ASCII` | `1` prints ASCII only, for a terminal whose font cannot show emoji or box drawing; `0` turns it off. On by default when `TERM` is `linux` (the Linux console). |
+| `PYTHONIOENCODING` | The output encoding. When it is set, Clause Code keeps it and prints an ASCII stand-in for each character it cannot hold. |
+
+## Unicode output
+
+Clause Code prints emoji, box drawing, and colored bulbs.
+It picks the output encoding at start:
+
+- A Windows console (Windows Terminal or the classic console) gets Unicode whatever its code page.
+- Output piped or redirected to a file is written as UTF-8.
+- A terminal with a legacy encoding (a Latin-1 locale, or `PYTHONLEGACYWINDOWSSTDIO` with a code page such as 437) keeps that encoding.
+
+A character the encoding cannot hold is replaced by an ASCII stand-in chosen for it: a bulb becomes `o`, an arrow `->`, a box line `-`, and a decorative emoji is left out with the space after it.
+The table is `FALLBACKS` in `src/clause_code/terminal.py`.
+On Windows, Clause Code also turns on VT processing in the classic console, so it shows 24-bit color there as Windows Terminal does.
 
 ## Project settings
 

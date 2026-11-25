@@ -92,7 +92,8 @@ src/clause_code/
 ├── console.py            # keeps the terminal's Ctrl+C away from the runtime (and its launcher)
 ├── cheerlights.py        # the live color, its history, who set it, Bluesky posts
 ├── cheerlights_tools.py  # CheerLights tools for Claude
-├── theme.py              # festive and minimal messages, snow, the countdown
+├── terminal.py           # output encoding, ASCII stand-ins, the Rich console
+├── theme.py              # festive and minimal messages, the tree, snow, the countdown
 ├── commands/             # slash command handlers
 └── utils/config.py       # ~/.clause-code settings
 ```

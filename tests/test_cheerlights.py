@@ -100,7 +100,9 @@ class TestWords:
 
     @pytest.mark.parametrize("name", ["yellow", "white", "oldlace", "cyan", "pink", "orange"])
     def test_light_colors_get_dark_ink(self, name):
-        assert ink_for(PALETTE[name]) == "#000000"
+        from clause_code.cheerlights import DARK_INK
+
+        assert ink_for(PALETTE[name]) == DARK_INK
 
     @pytest.mark.parametrize("name", ["blue", "purple", "red", "green"])
     def test_dark_colors_get_light_ink(self, name):
@@ -315,6 +317,32 @@ class FakeThingSpeak:
         return {"feeds": self.entries}
 
 
+class GatedThingSpeak(FakeThingSpeak):
+    """ThingSpeak whose answers to last.json wait until the test releases them, in any order."""
+
+    def __init__(self, entries):
+        super().__init__(entries)
+        self.waiting = []
+
+    async def __call__(self, url):
+        if url.endswith("feeds/last.json"):
+            gate = asyncio.get_running_loop().create_future()
+            self.waiting.append(gate)
+            await gate
+        return await super().__call__(url)
+
+    async def answer(self, index):
+        self.waiting[index].set_result(None)
+        await settle()
+
+    async def answer_all(self):
+        for gate in self.waiting:
+            if not gate.done():
+                gate.set_result(None)
+        self.waiting.clear()
+        await settle()
+
+
 async def settle():
     for _ in range(20):
         await asyncio.sleep(0)
@@ -408,6 +436,84 @@ class TestService:
         assert service.current == Color("blue", "#0000ff", NOW)
         await service.stop_live()
 
+    async def test_overlapping_pushes_keep_the_newest(self):
+        """Two pushes close together each check ThingSpeak; the older one's answer can
+        come back last, and must not replace the newer color."""
+        gated = GatedThingSpeak([LAST])
+        service = CheerLights(get=gated, feed_factory=FakeFeed, now=lambda: NOW)
+        await service.start_live()
+        await settle()
+        await gated.answer_all()  # the first read
+        assert service.current.name == "magenta"
+
+        service._spawn(service._on_pushed("green"))
+        await settle()
+        service._spawn(service._on_pushed("blue"))
+        await settle()
+        await gated.answer(1)  # blue's check returns first
+        await gated.answer(0)  # then green's
+
+        assert service.current.name == "blue"
+        assert [c.name for c in service.changes_since(NOW - timedelta(minutes=1))] == ["blue"]
+        await service.stop_live()
+
+    async def test_poll_keeps_a_pushed_color_over_an_older_entry(self, service, monkeypatch):
+        """The broker drops right after a push, before ThingSpeak has the new entry."""
+        monkeypatch.setattr("clause_code.cheerlights.POLL_INTERVAL_S", 0)
+        await service.start_live()
+        await settle()
+        await service._on_pushed("blue")  # ThingSpeak still says magenta
+
+        await settle()  # the poller reads magenta again and again
+
+        assert service.current.name == "blue"
+        assert [c.name for c in service.changes_since(NOW - timedelta(minutes=1))] == ["blue"]
+        await service.stop_live()
+
+    async def test_poll_adopts_thingspeak_record_of_a_pushed_color(self, service, ts, monkeypatch):
+        monkeypatch.setattr("clause_code.cheerlights.POLL_INTERVAL_S", 0)
+        await service.start_live()
+        await settle()
+        await service._on_pushed("blue")
+        ts.entries.append(
+            {"created_at": "2026-11-24T21:15:01Z", "entry_id": 1067961, "field1": "blue"}
+        )
+
+        await settle()
+
+        assert service.current.entry_id == 1067961
+        assert len(service.changes) == 1  # the same change, now with ThingSpeak's time
+        await service.stop_live()
+
+    async def test_poll_takes_a_newer_color(self, service, ts, monkeypatch):
+        monkeypatch.setattr("clause_code.cheerlights.POLL_INTERVAL_S", 0)
+        await service.start_live()
+        await settle()
+        ts.entries.append(
+            {"created_at": "2026-11-24T21:14:00Z", "entry_id": 1067961, "field1": "red"}
+        )
+
+        await settle()
+
+        assert service.current.name == "red"
+        assert [c.name for c in service.changes_since(NOW - timedelta(minutes=1))] == ["red"]
+        await service.stop_live()
+
+    async def test_poll_never_goes_back_to_an_older_entry(self, service, ts, monkeypatch):
+        """A ThingSpeak read served from a lagging copy must not undo a newer entry."""
+        monkeypatch.setattr("clause_code.cheerlights.POLL_INTERVAL_S", 0)
+        newer = {"created_at": "2026-11-24T21:14:00Z", "entry_id": 1067961, "field1": "red"}
+        ts.entries.append(newer)
+        await service.start_live()
+        await settle()
+        assert service.current.name == "red"
+
+        ts.entries.append(LAST)  # an older entry served last
+        await settle()
+
+        assert service.current.name == "red"
+        await service.stop_live()
+
     async def test_attribution_after_a_change(self, ts):
         ts.search = {
             "posts": [
@@ -479,20 +585,58 @@ class TestService:
 
 
 class TestReadable:
-    def test_every_palette_color_reads_on_a_dark_terminal(self):
-        from clause_code.cheerlights import DARK_BACKGROUND, contrast, readable
+    """Text in a CheerLights color has to read on dark and light terminals alike."""
+
+    def test_every_palette_color_reads_on_dark_and_light_terminals(self):
+        from clause_code.cheerlights import (
+            DARK_BACKGROUND,
+            LIGHT_BACKGROUND,
+            TEXT_CONTRAST,
+            contrast,
+            readable,
+        )
 
         for hex_value in PALETTE.values():
-            assert contrast(readable(hex_value), DARK_BACKGROUND) >= 4.5
+            text = readable(hex_value)
+            assert contrast(text, DARK_BACKGROUND) >= TEXT_CONTRAST, hex_value
+            assert contrast(text, LIGHT_BACKGROUND) >= TEXT_CONTRAST, hex_value
+
+    def test_colors_that_already_read_are_left_alone(self):
+        from clause_code.cheerlights import readable
+
+        assert readable("#ff0000") == "#ff0000"
+        assert readable("#008000") == "#008000"
+
+    def test_dark_colors_are_lightened_and_light_ones_darkened(self):
+        from clause_code.cheerlights import readable
+
+        assert readable("#0000ff") == "#4c4cff"
+        assert readable("#ffff00") == "#8a8a00"
+        assert readable("#ffffff") == "#858585"
+
+    def test_garbage_passes_through(self):
+        from clause_code.cheerlights import readable
+
+        assert readable("nope") == "nope"
+
+
+class TestGlow:
+    """Bulbs hang on a dark strip, so they only need to show against dark."""
+
+    def test_every_palette_color_glows_on_the_night_strip(self):
+        from clause_code.cheerlights import DARK_BACKGROUND, contrast, glow
+
+        for hex_value in PALETTE.values():
+            assert contrast(glow(hex_value), DARK_BACKGROUND) >= 4.5
 
     def test_bright_colors_are_left_alone(self):
-        from clause_code.cheerlights import readable
+        from clause_code.cheerlights import glow
 
-        assert readable("#ffff00") == "#ffff00"
-        assert readable("#ff0000") == "#ff0000"
+        assert glow("#ffff00") == "#ffff00"
+        assert glow("#ffffff") == "#ffffff"
 
     def test_dark_colors_keep_their_hue(self):
-        from clause_code.cheerlights import readable
+        from clause_code.cheerlights import glow
 
-        assert readable("#0000ff") == "#6666ff"
-        assert readable("#800080") == "#b366b3"
+        assert glow("#0000ff") == "#6666ff"
+        assert glow("#800080") == "#b366b3"

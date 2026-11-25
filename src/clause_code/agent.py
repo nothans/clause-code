@@ -1,6 +1,7 @@
 """Claude integration built on the Claude Agent SDK."""
 
 import asyncio
+import warnings
 from collections import deque
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
@@ -8,6 +9,7 @@ from typing import Optional
 
 from claude_agent_sdk import (
     AgentDefinition,
+    CanUseToolShadowedWarning,
     ClaudeAgentOptions,
     ClaudeSDKClient,
     HookMatcher,
@@ -43,7 +45,7 @@ MODELS = {
     "sonnet": {
         "id": "claude-sonnet-5-5",
         "name": "Claude Sonnet 5.5",
-        "emoji": "⛷️",
+        "emoji": "🏂",
         "description": "Fast and capable for everyday coding",
     },
     "haiku": {
@@ -55,6 +57,11 @@ MODELS = {
 }
 DEFAULT_MODEL = "opus"
 CONTEXT_WINDOW = "1M"
+
+# The read-only CheerLights tools are allowed outright on purpose, so the approval callback
+# never sees them. The SDK warns about that on every start; the warning is for us, not
+# for the person at the terminal.
+warnings.filterwarnings("ignore", category=CanUseToolShadowedWarning)
 
 # Claude asks in plain text instead; Clause Code has no UI for this tool.
 DISALLOWED_TOOLS = ["AskUserQuestion"]

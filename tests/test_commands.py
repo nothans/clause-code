@@ -304,19 +304,29 @@ class TestClearCommand:
 class TestHelpCommand:
     """Test cases for HelpCommand."""
 
-    async def test_lists_every_command_and_exit(self, config_manager, mock_console, mock_agent):
+    async def test_lists_every_command_and_exit(
+        self, config_manager, recording_console, mock_agent
+    ):
         commands = {
-            "setkey": SetKeyCommand(config_manager, mock_console),
-            "autoaccept": AutoAcceptCommand(mock_agent, mock_console),
-            "advent": AdventCommand(mock_console),
+            "setkey": SetKeyCommand(config_manager, recording_console),
+            "autoaccept": AutoAcceptCommand(mock_agent, recording_console),
+            "advent": AdventCommand(recording_console),
         }
-        commands["help"] = HelpCommand(commands, mock_console)
+        commands["help"] = HelpCommand(commands, recording_console)
 
         await commands["help"].execute()
 
-        printed = " ".join(str(c.args[0]) for c in mock_console.print.call_args_list if c.args)
-        for name in ("/setkey", "/autoaccept", "/advent", "/help", "/exit"):
+        printed = recording_console.export_text()
+        for name in ("/setkey", "/autoaccept", "/advent", "/help", "/exit", "Ctrl+C"):
             assert name in printed
+        # Names and descriptions line up in one column
+        starts = {
+            line.index(text)
+            for line in printed.splitlines()
+            for text in ("Set or update", "Let the elves", "Exit Clause Code")
+            if text in line
+        }
+        assert len(starts) == 1
 
 
 class TestCommandRegistry:

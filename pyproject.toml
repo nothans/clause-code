@@ -1,21 +1,37 @@
 [project]
 name = "clause-code"
 dynamic = ["version"]
-description = "The AI coding assistant that brings holiday cheer to your terminal"
+description = "A holiday-themed coding agent for your terminal, built on the Claude Agent SDK, that can follow the live CheerLights color"
 authors = [{name = "Hans Scharler"}]
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "MIT"}
-keywords = ["ai", "coding", "assistant", "christmas", "claude", "anthropic", "agent"]
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = [
+    "ai",
+    "coding",
+    "assistant",
+    "agent",
+    "claude",
+    "claude-agent-sdk",
+    "anthropic",
+    "terminal",
+    "cli",
+    "christmas",
+    "cheerlights",
+]
 classifiers = [
     "Development Status :: 4 - Beta",
+    "Environment :: Console",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
-    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development",
 ]
 
 dependencies = [
@@ -39,7 +55,10 @@ clause-code = "clause_code.cli:main"
 [project.urls]
 Homepage = "https://github.com/nothans/clause-code"
 Repository = "https://github.com/nothans/clause-code"
-Documentation = "https://github.com/nothans/clause-code#readme"
+Documentation = "https://github.com/nothans/clause-code/tree/main/docs"
+Issues = "https://github.com/nothans/clause-code/issues"
+Changelog = "https://github.com/nothans/clause-code/blob/main/docs/whats-new-3.0.md"
+"Blog post" = "https://nothans.com/introducing-clause-code"
 
 [build-system]
 requires = ["hatchling"]

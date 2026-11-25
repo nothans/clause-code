@@ -10,7 +10,7 @@ CheerLights mode makes Clause Code follow it too.
 ● 🎅 > /cheerlights
 🎄 CheerLights mode on. Clause Code now wears the color that lights around the world are showing,
 and changes when they do.
-  ●─●─●─●─●─●─●─●─●  orange #ffa500 · set 15 min ago · by someone, somewhere
+   ●─●─●─●─●─●─●─●─●    orange   #ffa500 · set 15 min ago · by someone, somewhere
   /cheerlights history · /cheerlights <color> to set it · /cheerlights off
 ```
 
@@ -19,13 +19,20 @@ The setting is saved, so CheerLights mode is still on the next time you start Cl
 
 ## What changes
 
-- The bulb in front of the prompt, the thinking spinner, the tool labels, and the success line take the current color.
+- The bulb in front of the prompt and the thinking spinner take the current color.
 - The status line under the prompt shows the color as a swatch, when it was set, and who set it when that is known.
 - A finished task ends with a string of lights in the current color.
-  When the color changed while Claude worked, the line lists the changes: `While you worked, the lights went red → green → blue`.
+  When the color changed while Claude worked, the line lists the changes as swatches: `While you worked, the lights went red → green → blue`.
 - `/snow` falls in the current color.
 
-Text uses a lighter shade of dark colors (blue becomes `#6666ff`, purple `#b366b3`) so it reads on a dark terminal; the bulbs and the swatch use the real color.
+Tool labels and the success line keep their own colors, so a red light never makes a finished turn look like an error.
+
+The colors are chosen to read on dark and light terminals:
+
+- A color's name is set on a swatch of the real color, in dark or white ink, whichever reads better.
+- Bulbs hang on a dark strip (`#252525`), so white, yellow, and pink bulbs show on a light terminal; dark colors are lightened to glow on it (blue becomes `#6666ff`).
+- The spinner is a shade of the color with at least 3.5:1 contrast on both a dark (`#0c0c0c`) and a light (`#fafafa`) background (blue becomes `#4c4cff`, yellow `#8a8a00`).
+  No color reaches the usual 4.5:1 on both at once.
 
 ## Where the color comes from
 

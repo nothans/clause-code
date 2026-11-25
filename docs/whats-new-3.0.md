@@ -7,7 +7,7 @@ It also fixes four bugs from 2.0, two of which ended conversations or showed rep
 
 `/cheerlights` makes Clause Code follow [CheerLights](https://cheerlights.com), the network of lights around the world that all show one color that anyone can set.
 
-- The prompt bulb, spinner, tool labels, and success line take the live color, and change when the color changes.
+- The prompt bulb and the spinner take the live color, and change when the color changes.
 - The status line shows the color, how long ago it was set, and who set it when that is public (colors set from Bluesky).
 - A finished task ends with a string of lights in the current color, and lists the changes when the color moved while Claude worked.
 - `/cheerlights history` shows recent colors as a row of colored bulbs.
@@ -28,6 +28,21 @@ Details: [CheerLights mode](cheerlights.md).
   When the conversation is compacted, Clause Code says so.
 - Background work is shown while it runs, and its follow-up arrives in the same turn.
 
+## Festive extras
+
+- `/snow` shows three seconds of falling snow, in the CheerLights color when CheerLights mode is on.
+- In festive mode, the welcome screen counts the sleeps until Christmas.
+
+## In the terminal
+
+- The welcome screen fits in 11 lines: the tree beside the model, the folder, and the mode, with long folder paths shortened.
+- Text keeps its own colors on dark and light terminal themes; color names sit on swatches of the real color, and bulbs hang on a dark strip so white and yellow stay visible.
+- `/help` lists commands and keys in aligned columns, and `/context` shows a plain bar.
+- Output sent to a pipe or a file is UTF-8, and a terminal keeps its own encoding.
+  A character the terminal cannot show becomes an ASCII stand-in (a bulb becomes `o`, an arrow `->`), so borders and columns stay aligned.
+  `CLAUSE_CODE_ASCII=1` forces ASCII everywhere.
+  Details: [Unicode output](configuration.md#unicode-output).
+
 ## Safety
 
 - The project-folder write guard fails closed: if the hook itself breaks, the write is blocked.
@@ -43,6 +58,8 @@ Details: [CheerLights mode](cheerlights.md).
 - When a background task finished after a turn, its follow-up showed up under the next message, and every reply after that was one turn late.
 - Typing `/c` and pressing Tab completed nothing, and every space in an ordinary message popped up the list of commands.
 - A one-line file preview said "(1 lines)".
+- On Windows, output sent to a pipe or a file crashed on the first emoji (`UnicodeEncodeError`).
+- Every start printed a long SDK warning about `can_use_tool`.
 
 ## Under the hood
 
@@ -50,7 +67,7 @@ Details: [CheerLights mode](cheerlights.md).
 - New SDK features in use: `create_sdk_mcp_server` and `@tool` for the CheerLights tools, `AgentDefinition` for the checker, `enable_file_checkpointing` and `rewind_files` for undo, `set_permission_mode("plan")` with a `setMode` update for plan approval, `list_sessions`, `tag_session`, and `resume` for sessions, `get_context_usage`, `stop_task`, `HookMatcher(on_failure="block")`, and `client_app`.
 - New dependency: `paho-mqtt` 2.1.0, for the CheerLights broker.
 - On macOS and Linux the runtime starts through `~/.clause-code/runtime-launcher.sh`, passed as `cli_path`, so it runs in a session of its own.
-- 355 tests pass on Windows 11 and 362 on Ubuntu (WSL), both with Python 3.12; the Ubuntu run includes the 4 live CheerLights checks (`CLAUSE_LIVE=1`) and the tests that need a POSIX shell.
+- 426 tests pass on Windows 11 and 433 on Ubuntu (WSL), both with Python 3.12; the Ubuntu run includes the 4 live CheerLights checks (`CLAUSE_LIVE=1`) and the tests that need a POSIX shell.
   Every feature was also run end to end in a real Windows console, driving the app as a user would.
 
 ## Not in 3.0

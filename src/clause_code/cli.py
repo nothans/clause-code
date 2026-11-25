@@ -2,7 +2,7 @@
 
 import argparse
 import asyncio
-import getpass
+import os
 import signal
 import sys
 import threading
@@ -17,14 +17,15 @@ from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.styles import Style
-from rich.console import Console
-from rich.markup import escape
+from rich.console import Console, Group, RenderableType
+from rich.padding import Padding
 from rich.prompt import Prompt
+from rich.table import Table
 from rich.text import Text
 
 from ._version import __version__
 from .agent import CONTEXT_WINDOW, MODELS, ClauseAgent
-from .cheerlights import BlueskyPoster, CheerLights, ago, ink_for
+from .cheerlights import BlueskyPoster, CheerLights, ago, glow, ink_for
 from .commands import (
     AdventCommand,
     AutoAcceptCommand,
@@ -47,10 +48,39 @@ from .commands import (
 from .commands.cheerlights import color_line
 from .permissions import ToolApprover
 from .render import TurnRenderer
-from .theme import FestiveTheme, christmas_countdown
+from .terminal import TerminalConsole, ask_secret, fit, prepare_terminal
+from .theme import NIGHT, FestiveTheme, christmas_countdown, christmas_tree
 from .utils.config import ConfigManager
 
 PROMPT_STYLE = Style.from_dict({"bottom-toolbar": "noreverse"})
+
+TAGLINE = "A holiday coding agent for your terminal"
+KEYS_URL = "https://console.anthropic.com/account/keys"
+# The tree and the gap beside it on the welcome screen
+TREE_WIDTH = 11 + 3
+
+
+def short_path(path: Path, width: int, home: Optional[Path] = None) -> str:
+    """A folder for display: "~" for the home folder, and middle folders cut to fit.
+
+    With the home folder /home/hans, "/home/hans/code/north/pole/sleigh" at width 20
+    becomes "~/…/pole/sleigh".
+    """
+    text = str(path)
+    home_text = str(home if home is not None else Path.home())
+    if text == home_text or text.startswith(home_text.rstrip(os.sep) + os.sep):
+        text = "~" + text[len(home_text.rstrip(os.sep)) :]
+    if len(text) <= width:
+        return text
+    parts = text.split(os.sep)
+    tail = parts[-1]
+    for keep in range(len(parts) - 2, 0, -1):
+        candidate = os.sep.join([parts[0], "…", *parts[-keep:]])
+        if len(candidate) <= width:
+            return candidate
+    if len(tail) + 2 <= width:
+        return "…" + os.sep + tail
+    return "…" + text[-(width - 1) :] if width > 1 else "…"
 
 
 def command_completer(names: list[str]) -> WordCompleter:
@@ -107,7 +137,7 @@ class ClauseCodeCLI:
         cheerlights: Optional[CheerLights] = None,
     ):
         """Initialize CLI."""
-        self.console = console or Console()
+        self.console = console or TerminalConsole()
         self.config_manager = config_manager or ConfigManager()
         self.cheerlights = cheerlights or CheerLights(poster=BlueskyPoster.from_env())
         self.agent: Optional[ClauseAgent] = None
@@ -139,12 +169,23 @@ class ClauseCodeCLI:
     async def _cheerlights_toggled(self, enabled: bool) -> None:
         self._refresh_prompt()
 
+    def _fit(self, text: str) -> str:
+        """Text as the terminal can show it (prompt_toolkit text skips Rich's fitting)."""
+        return fit(text, self.console.encoding)
+
+    @property
+    def theme(self):
+        """The current theme; festive until an agent says otherwise."""
+        return self.agent.theme if self.agent is not None else FestiveTheme
+
     def prompt_message(self) -> FormattedText:
-        """The input prompt; its bulb wears the CheerLights color in CheerLights mode."""
+        """The input prompt; in CheerLights mode it starts with a bulb in the live color."""
+        prompt = self._fit(self.theme.prompt)
         hex_value = self.accent()
         if hex_value:
-            return FormattedText([(f"bold {hex_value}", "● "), ("", "🎅 > ")])
-        return FormattedText([("", "🎅 > ")])
+            bulb = (f"bold {glow(hex_value)} bg:{NIGHT}", self._fit(" ● "))
+            return FormattedText([bulb, ("", " " + prompt)])
+        return FormattedText([("", prompt)])
 
     def toolbar(self) -> FormattedText:
         """The status line under the prompt: model, permission mode, and CheerLights."""
@@ -160,15 +201,15 @@ class ClauseCodeCLI:
         if self.cheerlights_mode:
             parts.append(("fg:ansibrightblack", " · "))
             parts.extend(self._cheerlights_status())
-        return FormattedText(parts)
+        return FormattedText([(style, self._fit(text)) for style, text in parts])
 
     def _cheerlights_status(self) -> list[tuple[str, str]]:
         cheer = self.cheerlights
         color = cheer.current
         if color is None:
             if cheer.status == "offline":
-                return [("fg:ansiyellow", "🎄 lights out of reach")]
-            return [("fg:ansibrightblack", "🎄 finding the lights...")]
+                return [("fg:ansiyellow", "lights out of reach")]
+            return [("fg:ansibrightblack", "finding the lights...")]
         chip = f"bg:{color.hex} fg:{ink_for(color.hex)} bold"
         who = f"by @{cheer.setter.handle}" if cheer.setter else "by someone, somewhere"
         rest = f" set {ago(color.set_at, cheer.now())} {who}"
@@ -178,45 +219,46 @@ class ClauseCodeCLI:
 
     # Screens
 
-    def show_welcome(self):
-        """Show festive welcome screen."""
-        self.console.clear()
-        self.console.print(FestiveTheme.WELCOME_TREE, style="green", justify="center")
-        self.console.print(f"[bold green]Clause Code v{__version__}[/bold green]", justify="center")
-        self.console.print(
-            "[dim]The AI coding assistant with holiday cheer[/dim]\n",
-            justify="center",
+    def _header(self, body: list[RenderableType], festive: bool) -> None:
+        """The welcome layout: the tree on the left in festive mode, the text beside it."""
+        info = Group(
+            Text.assemble((f"Clause Code {__version__}", "bold"), "  ", (TAGLINE, "dim")),
+            Text(),
+            *body,
         )
+        if festive and self.console.width >= 64:
+            layout = Table.grid(padding=(0, 3))
+            layout.add_column(no_wrap=True)
+            layout.add_column()
+            layout.add_row(christmas_tree(), info)
+            self.console.print(Padding(layout, (1, 0, 1, 2), expand=False))
+        else:
+            self.console.print(Padding(info, (1, 0, 1, 2), expand=False))
+
+    def welcome_details(self) -> Table:
+        """Model, folder, and mode, as aligned label and value pairs."""
+        agent = self.agent
+        festive = agent.festive_mode
+        room = self.console.width - 2 - (TREE_WIDTH if festive else 0) - 9
+        mode = "festive" if festive else "minimal"
+        if festive:
+            mode += f" · {christmas_countdown(date.today())}"
+        details = Table.grid(padding=(0, 2))
+        details.add_column(style="dim", no_wrap=True)
+        details.add_column(no_wrap=True, overflow="ellipsis")
+        details.add_row("model", f"{agent.model_info['name']} · {CONTEXT_WINDOW} context")
+        details.add_row("folder", short_path(agent.project_folder, max(room, 12)))
+        details.add_row("mode", mode)
+        return details
 
     def show_main_screen(self):
-        """Show main interface screen."""
-        model_info = self.agent.model_info
-        project = escape(str(self.agent.project_folder))
-        mode = "🎅 Festive" if self.agent.festive_mode else "⚙️ Minimal"
-        countdown = f"\n    {christmas_countdown(date.today())}" if self.agent.festive_mode else ""
-
-        banner = f"""[bold]═══ Clause Code v{__version__} ═══════════════════════════════════════════════════[/bold]
-
-    Welcome back Santa's Helper!{countdown}
-
-{FestiveTheme.WELCOME_TREE}
-    {model_info["emoji"]} {model_info["name"]} • Claude Agent SDK
-    📁 {project}
-
-[dim]─────────────────────────────────────────────────────────────────────────────[/dim]
-
-    [bold]Tips for getting started[/bold]
-    • Just type naturally - Claude can read, edit, and run code in this folder
-    • You approve every edit and every command that changes things; [cyan]/undo[/cyan] rolls back edits
-    • [cyan]/plan[/cyan] to plan before building, [cyan]/cheerlights[/cyan] for the lights, [cyan]/help[/cyan] for the rest
-
-    [bold]Current Settings[/bold]
-    Model: {model_info["name"]} • Context: {CONTEXT_WINDOW} tokens
-    Mode: {mode}
-
-[dim]═════════════════════════════════════════════════════════════════════════════[/dim]
-"""
-        self.console.print(banner)
+        """Show the welcome screen: who we are, where we work, and how to start."""
+        tips = Text.from_markup(
+            "Describe what you want. You approve each edit and each command.\n"
+            "[cyan]/plan[/cyan] plans first · [cyan]/undo[/cyan] rolls back · "
+            "[cyan]/help[/cyan] lists the rest"
+        )
+        self._header([self.welcome_details(), Text(), tips], self.agent.festive_mode)
 
     def setup_first_run(self) -> bool:
         """Ask for an API key and preferences on first run.
@@ -224,36 +266,31 @@ class ClauseCodeCLI:
         Returns:
             True if setup successful, False otherwise
         """
-        self.show_welcome()
-
-        self.console.print(FestiveTheme.WELCOME_BANNER)
-        self.console.print("[bold]Let's get your workshop set up![/bold]\n")
-
-        self.console.print("[yellow]🎅 I don't see an API key configured yet.[/yellow]")
-        self.console.print(
-            "[cyan]Get your key from: https://console.anthropic.com/account/keys[/cyan]\n"
+        self.console.clear()
+        intro = Text.assemble(
+            "Let's set up your workshop.\nClause Code needs an Anthropic API key:\n",
+            (KEYS_URL, "cyan"),
         )
-        api_key = getpass.getpass("🔐 Enter your Anthropic API key (hidden): ").strip()
+        self._header([intro], festive=True)
+        api_key = ask_secret(self.console, "Anthropic API key (hidden): ").strip()
 
         if not api_key.startswith("sk-ant-"):
             self.console.print(
-                "[red]❌ Invalid or missing API key. Please run 'clause-code' again.[/red]"
+                Text("❌ That is not an Anthropic API key; they start with sk-ant-.", style="red")
             )
+            self.console.print("[dim]Run clause-code again to try once more.[/dim]")
             return False
 
         self.config_manager.set_api_key(api_key)
-        self.console.print("[green]✨ API key saved![/green]\n")
+        self.console.print("[green]✨ API key saved.[/green]\n")
 
-        festive = Prompt.ask("❄️  Enable festive mode?", choices=["y", "n"], default="y")
+        festive = Prompt.ask(
+            "🎄 Festive mode (holiday labels and tone)?", choices=["y", "n"], default="y"
+        )
         if festive.lower() == "n":
             self.config_manager.set_festive_mode(False)
 
-        self.console.print(
-            "\n[bold green]✨ Configuration saved to ~/.clause-code/config.json[/bold green]"
-        )
-        self.console.print(
-            "[green]🎄 Your workshop is ready! Let's start coding with holiday cheer![/green]\n"
-        )
+        self.console.print("[dim]Settings are in ~/.clause-code/config.json.[/dim]\n")
         return True
 
     def resolve_project_folder(self, override: Optional[str]) -> Path:
@@ -353,7 +390,7 @@ class ClauseCodeCLI:
                 return
             interrupting = True
             renderer.pause()
-            self.console.print(Text("⏸  Interrupting...", style="dim"))
+            self.console.print(Text("⏳ Interrupting...", style="dim"))
             self._interrupt_task = loop.create_task(self.agent.interrupt())
 
         restore_sigint = install_sigint(loop, on_sigint)
@@ -389,9 +426,7 @@ class ClauseCodeCLI:
         )
         self._prompt_session = session
 
-        self.console.print(
-            "[bold green]🎄 Ready! What would you like to build today?[/bold green]\n"
-        )
+        self.console.print(Text(self.theme.ready + "\n", style="bold"))
 
         while True:
             try:
@@ -449,7 +484,7 @@ class ClauseCodeCLI:
                 "[red]❌ The Claude Code runtime that ships with claude-agent-sdk is missing.[/red]"
             )
             self.console.print(
-                "[dim]Try reinstalling: pip install --force-reinstall claude-agent-sdk[/dim]"
+                "[dim]Try reinstalling: uv sync --reinstall-package claude-agent-sdk[/dim]"
             )
             return 1
         except ClaudeSDKError as e:
@@ -471,8 +506,14 @@ class ClauseCodeCLI:
             await self.cheerlights.stop_live()
             await self.agent.disconnect()
 
-        self.console.print("\n[bold green]🎄 Thanks for coding with Clause Code![/bold green]")
-        self.console.print("[green]❄️  May your code compile and your bugs be few![/green]\n")
+        if self.agent.festive_mode:
+            self.console.print(
+                Text(
+                    "\n🎄 Thanks for coding with Clause Code! "
+                    "May your code compile and your bugs be few.\n",
+                    style="green",
+                )
+            )
         return 0
 
     async def _show_cheerlights_line(self) -> None:
@@ -496,7 +537,7 @@ def build_parser() -> argparse.ArgumentParser:
     """Build the command-line parser."""
     parser = argparse.ArgumentParser(
         prog="clause-code",
-        description="The AI coding assistant that brings holiday cheer to your terminal.",
+        description="A holiday coding agent for your terminal, built on the Claude Agent SDK.",
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--model", choices=list(MODELS), help="Model for this session")
@@ -522,11 +563,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Optional[list[str]] = None):
     """Main entry point."""
-    args = build_parser().parse_args(argv)
+    restore_console = prepare_terminal()
     try:
-        exit_code = asyncio.run(ClauseCodeCLI().run(args))
-    except KeyboardInterrupt:
-        exit_code = 130
+        args = build_parser().parse_args(argv)
+        try:
+            exit_code = asyncio.run(ClauseCodeCLI().run(args))
+        except KeyboardInterrupt:
+            exit_code = 130
+    finally:
+        restore_console()
     sys.exit(exit_code)
 
 

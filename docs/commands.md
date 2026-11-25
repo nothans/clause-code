@@ -33,7 +33,7 @@ Type `/help` in the app for the same list.
 |---|---|
 | `/setkey` | Set or replace your Anthropic API key and start a new session with it. |
 | `/project [path]` | Switch to another project folder, remember it for next time, and start a new session. |
-| `/model [opus\|sonnet\|haiku]` | Switch models and keep the conversation. |
+| `/model [opus\|sonnet\|haiku]` | Switch models and keep the conversation. The model you pick also becomes the default for the next start. |
 | `/santa` | Festive mode: holiday status messages, tool labels, and tone. |
 | `/grinch` | Minimal mode: plain labels and a professional tone. |
 
@@ -48,8 +48,8 @@ The status messages change at once; Claude's tone follows from the next `/clear`
 | `/cheerlights history [n]` | Show the last `n` colors (12 by default, at most 100). |
 | `/cheerlights <color>` | Set the color for everyone by posting `#cheerlights <color>` to your Bluesky account. |
 | `/cheerlights how` | Explain the ways to set the color. |
-| `/snow` | Three seconds of snow, in the CheerLights color when CheerLights mode is on. |
-| `/advent [day]` | The day's coding challenge in December, or any day from 1 to 25. |
+| `/snow` | Three seconds of snow, in the CheerLights color when CheerLights mode is on. Festive mode only. |
+| `/advent [day]` | In December, the day's coding challenge, or the challenge for any day from 1 to 25. Outside December it asks you to come back then. |
 
 ## Utility
 

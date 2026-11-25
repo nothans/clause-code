@@ -37,8 +37,9 @@ ENV/
 *~
 .DS_Store
 
-# Testing
+# Testing and lint
 .pytest_cache/
+.ruff_cache/
 .coverage
 htmlcov/
 .tox/

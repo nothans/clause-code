@@ -167,7 +167,9 @@ class TestCheerLightsCommand:
         toggled.assert_awaited_once_with(True)
         text = recording_console.export_text()
         assert "CheerLights mode on" in text
-        assert "magenta #ff00ff" in text and "by someone, somewhere" in text
+        # The name on a swatch of the color, then its hex, age, and setter
+        assert " magenta   #ff00ff · set 5 min ago" in text
+        assert "by someone, somewhere" in text
         await cheer.stop_live()
 
     async def test_bare_command_when_on_just_shows_the_color(
@@ -237,7 +239,8 @@ class TestSnow:
     async def test_snows_in_festive_mode(self, recording_console, monkeypatch):
         monkeypatch.setattr(SnowCommand, "SECONDS", 0.25)
         await SnowCommand(recording_console).execute()
-        assert "❄️" in recording_console.export_text()
+        # The snow that settled stays on screen
+        assert "█" in recording_console.export_text()
 
     async def test_grinch(self, recording_console):
         await SnowCommand(recording_console, festive=lambda: False).execute()

@@ -23,13 +23,14 @@ from rich.markdown import Markdown
 from rich.status import Status
 from rich.text import Text
 
-from .cheerlights import CheerLights, light_string, readable
+from .cheerlights import CheerLights, glow, ink_for, readable
 from .permissions import display_path, is_plan_file
+from .theme import chip, strand
 
 API_ERRORS = {
     "authentication_failed": "🔑 Authentication failed. Check your API key with /setkey.",
     "billing_error": "💳 There is a billing problem with your Anthropic account.",
-    "rate_limit": "⏱️ Rate limit reached. Please wait a moment and try again.",
+    "rate_limit": "⏳ Rate limit reached. Please wait a moment and try again.",
     "invalid_request": "The API rejected the request.",
     "server_error": "The Anthropic API had a server error. Please try again shortly.",
 }
@@ -200,7 +201,11 @@ class TurnRenderer:
         self._after_text.clear()
 
     def _accent(self, default: str) -> str:
-        """The live CheerLights color in CheerLights mode, otherwise the theme's color."""
+        """The live CheerLights color in CheerLights mode, otherwise the theme's color.
+
+        Only the spinner wears it. Tool labels and the footer keep their own colors, so a
+        red light never makes a finished turn look like an error.
+        """
         if self.cheerlights is not None and self.cheerlights.current is not None:
             hex_value = self.cheerlights.current.hex
             return readable(hex_value) if hex_value else default
@@ -252,11 +257,11 @@ class TurnRenderer:
     def _handle_rate_limit(self, message: RateLimitEvent) -> None:
         info = message.rate_limit_info
         if info.get("status") == "rejected":
-            self._notice("⏱️ Rate limit reached; Claude is waiting for it to reset.", "yellow")
+            self._notice("⏳ Rate limit reached; Claude is waiting for it to reset.", "yellow")
         elif info.get("status") == "allowed_warning":
             used = info.get("utilization")
             share = f" ({used:.0%} used)" if isinstance(used, (int, float)) else ""
-            self._notice(f"⏱️ Getting close to a rate limit{share}.", "yellow")
+            self._notice(f"⏳ Getting close to a rate limit{share}.", "yellow")
 
     def _handle_stream_event(self, message: StreamEvent) -> None:
         if message.parent_tool_use_id:
@@ -309,7 +314,7 @@ class TurnRenderer:
         name = block.name
         if name in ("Write", "Edit") and is_plan_file(block.input.get("file_path", "")):
             name = "PlanFile"
-        line.append(self.theme.get_tool_label(name), style=self._accent("cyan"))
+        line.append(self.theme.get_tool_label(name), style="cyan")
         summary = summarize_tool_input(block.name, block.input, self.get_root())
         if summary:
             line.append(" ")
@@ -319,12 +324,12 @@ class TurnRenderer:
     def _handle_result(self, message: ResultMessage) -> None:
         self.pause()
         if message.terminal_reason in INTERRUPTED_REASONS:
-            self.console.print(Text("⚠️  Interrupted", style="dim"))
+            self.console.print(Text("✋ Interrupted", style="dim"))
             return
         if message.is_error:
             if self._api_error_shown:
                 return  # Already explained; the CLI's own text mentions commands we don't have
-            self.console.print(Text(self.theme.get_error_message(), style="bold red"))
+            self.console.print(Text(self.theme.get_error_message(), style="red"))
             for error in message.errors or []:
                 self.console.print(Text(error, style="red"))
             return
@@ -348,7 +353,9 @@ class TurnRenderer:
         stats = [f"{self._spent_ms / 1000:.1f}s"]
         if self._spent_usd is not None:
             stats.append(f"${self._spent_usd:.4f}")
-        footer = Text(self.theme.get_success_message(), style=self._accent("green"))
+        # The stats are spans of their own, so they are dim gray rather than dim green
+        footer = Text()
+        footer.append(self.theme.get_success_message(), style="green")
         footer.append("  " + " · ".join(stats), style="dim")
         self.console.print(footer)
         self._show_lights()
@@ -361,14 +368,16 @@ class TurnRenderer:
             return
         color = cheer.current
         line = Text("  ")
-        line.append(light_string(), style=f"bold {color.hex}")
+        line.append_text(strand(glow(color.hex)))
         changes = cheer.changes_since(self._started)
         if changes:
             line.append("  While you worked, the lights went ", style="dim")
             for i, change in enumerate(changes[-6:]):
                 if i:
                     line.append(" → ", style="dim")
-                line.append(change.name, style=f"bold {readable(change.hex)}")
+                line.append_text(chip(change.name, change.hex, ink_for(change.hex)))
         else:
-            line.append(f"  Lights around the world are {color.name} right now.", style="dim")
+            line.append("  Lights around the world are ", style="dim")
+            line.append_text(chip(color.name, color.hex, ink_for(color.hex)))
+            line.append(" right now.", style="dim")
         self.console.print(line)

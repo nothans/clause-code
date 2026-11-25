@@ -17,7 +17,7 @@ from clause_code.cli import (
     install_sigint,
 )
 from clause_code.permissions import ToolApprover
-from clause_code.theme import GrinchTheme
+from clause_code.theme import FestiveTheme, GrinchTheme
 
 
 def result(**overrides):
@@ -302,7 +302,7 @@ class TestStatusLine:
         assert self.text(formatted).endswith(" yellow  set 4 min ago by @cymplecy.bsky.social")
         chip = next(style for style, text in formatted if text == " yellow ")
         # Dark ink on a yellow chip, so it reads on any terminal background
-        assert "bg:#ffff00" in chip and "fg:#000000" in chip
+        assert "bg:#ffff00" in chip and "fg:#252525" in chip
 
     def test_cheerlights_offline(self, lit_cli):
         lit_cli.cheerlights.status = "offline"
@@ -313,12 +313,29 @@ class TestStatusLine:
         lit_cli.cheerlights.status = "connecting"
         assert "finding the lights" in self.text(lit_cli.toolbar())
 
-    def test_prompt_bulb(self, lit_cli, cli):
-        assert self.text(lit_cli.prompt_message()) == "● 🎅 > "
-        assert lit_cli.prompt_message()[0][0] == "bold #ffff00"
+    def test_prompt_bulb(self, lit_cli):
+        lit_cli.agent.theme = FestiveTheme
+        assert self.text(lit_cli.prompt_message()) == " ● " + " 🎅 > "
+        # The bulb hangs on the dark strip, so a yellow or white bulb shows on light themes
+        assert lit_cli.prompt_message()[0][0] == "bold #ffff00 bg:#252525"
 
-    def test_prompt_without_cheerlights(self, cli):
+    def test_prompt_follows_the_theme(self, cli):
+        cli.agent.theme = FestiveTheme
         assert self.text(cli.prompt_message()) == "🎅 > "
+        cli.agent.theme = GrinchTheme
+        assert self.text(cli.prompt_message()) == "> "
+
+    def test_prompt_in_ascii(self, lit_cli):
+        """A terminal that cannot show the bulb or Santa gets ASCII, not a crash."""
+        import io
+
+        from rich.console import Console
+
+        ascii_file = io.TextIOWrapper(io.BytesIO(), encoding="ascii")
+        lit_cli.console = Console(file=ascii_file)
+        lit_cli.agent.theme = FestiveTheme
+        assert self.text(lit_cli.prompt_message()) == " o " + " > "
+        assert self.text(lit_cli.toolbar()).isascii()
 
 
 class TestCommandCompleter:

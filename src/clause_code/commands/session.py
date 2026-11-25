@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from rich.console import Console
+from rich.padding import Padding
 from rich.prompt import Prompt
 from rich.text import Text
 
@@ -48,13 +49,13 @@ class PlanCommand(Command):
             return
         await self.agent.set_plan_mode(enabled)
         if enabled:
-            self.console.print("[bold green]🗺️ Plan mode on.[/bold green]")
+            self.console.print("[green]🧭 Plan mode on.[/green]")
             self.console.print(
                 "[dim]Claude reads and plans but changes nothing. When the plan is ready "
                 "you approve it, and then it builds.[/dim]"
             )
         else:
-            self.console.print("[green]🗺️ Plan mode off.[/green]")
+            self.console.print("[green]🧭 Plan mode off.[/green]")
 
 
 class ResumeCommand(Command):
@@ -114,7 +115,7 @@ class ResumeCommand(Command):
 
         await self.agent.resume(picked.session_id)
         title = (picked.summary or picked.first_prompt or picked.session_id).strip()
-        self.console.print(Text(f"🎁 Resumed: {title.splitlines()[0][:80]}", style="bold green"))
+        self.console.print(Text(f"🎁 Resumed: {title.splitlines()[0][:80]}", style="green"))
 
 
 class UndoCommand(Command):
@@ -137,7 +138,7 @@ class UndoCommand(Command):
             self.console.print("[dim]Nothing to undo in this conversation.[/dim]")
             return
         self.console.print(
-            "[bold green]⏪ Files are back to how they were before your last message.[/bold green]"
+            "[green]⏪ Files are back to how they were before your last message.[/green]"
         )
         self.console.print(
             "[dim]Shell command effects are not undone. Claude is told on your next message.[/dim]"
@@ -188,9 +189,11 @@ class ContextCommand(Command):
         total, limit = usage.get("totalTokens", 0), usage.get("maxTokens") or 1
         share = usage.get("percentage", total / limit * 100)
         filled = min(round(share / 100 * self.BAR), self.BAR)
+        if total and not filled:
+            filled = 1  # anything in the stocking shows
         bar = Text("  ")
-        bar.append("█" * filled, style="green" if share < 70 else "yellow")
-        bar.append("░" * (self.BAR - filled), style="dim")
+        bar.append("━" * filled, style="green" if share < 70 else "yellow")
+        bar.append("━" * (self.BAR - filled), style="dim")
         bar.append(f"  {share:.0f}% · {total:,} of {limit:,} tokens")
         self.console.print("\n[bold]🧦 Claude's stocking[/bold]")
         self.console.print(bar)
@@ -205,12 +208,18 @@ class ContextCommand(Command):
         )
         for category in categories[:6]:
             self.console.print(
-                Text(f"    {category['name']:<28} {category['tokens']:>9,}", style="dim")
+                Text(f"  {category['name']:<28} {category['tokens']:>9,}", style="dim")
             )
         if usage.get("isAutoCompactEnabled"):
             self.console.print(
-                "[dim]  When it fills up, the conversation is compacted into a summary, and "
-                "Clause Code tells you. /compact does it now.[/dim]\n"
+                Padding(
+                    Text(
+                        "When it fills up, the conversation is compacted into a summary, and "
+                        "Clause Code tells you. /compact does it now.\n",
+                        style="dim",
+                    ),
+                    (1, 0, 0, 2),
+                )
             )
 
 

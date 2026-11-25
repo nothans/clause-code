@@ -1,14 +1,17 @@
 """Configuration commands for Clause Code."""
 
-import getpass
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 from rich.console import Console
+from rich.padding import Padding
 from rich.prompt import Prompt
+from rich.table import Table
+from rich.text import Text
 
 from ..agent import MODELS, ClauseAgent
+from ..terminal import ask_secret
 from ..utils.config import ConfigManager
 from .base import Command
 
@@ -43,29 +46,25 @@ class SetKeyCommand(Command):
 
     async def execute(self, args: str = "", **kwargs) -> None:
         """Execute the command."""
-        self.console.print(
-            "\n[bold green]🎅 Ho ho ho! Let's set up your workshop key![/bold green]"
-        )
+        self.console.print("\n[green]🎅 Ho ho ho! Let's set up your workshop key![/green]")
         self.console.print(
             "[cyan]Get your key from: https://console.anthropic.com/account/keys[/cyan]\n"
         )
 
-        api_key = getpass.getpass("🔐 Enter your Anthropic API key (hidden): ").strip()
+        api_key = ask_secret(self.console, "Anthropic API key (hidden): ").strip()
 
         if not api_key:
-            self.console.print("[yellow]❄️ No key provided. Cancelled.[/yellow]")
+            self.console.print("[yellow]No key entered; nothing changed.[/yellow]")
             return
 
         if not api_key.startswith("sk-ant-"):
-            self.console.print("[yellow]❄️ That doesn't look like a valid Anthropic key...[/yellow]")
+            self.console.print("[yellow]That is not an Anthropic API key.[/yellow]")
             self.console.print("[cyan]Keys should start with 'sk-ant-'[/cyan]")
             return
 
         self.config_manager.set_api_key(api_key)
-        self.console.print(
-            "[bold green]✨ Your workshop key has been saved to Santa's vault![/bold green]"
-        )
-        self.console.print("[dim]Stored in ~/.clause-code/.api_key (readable only by you)[/dim]")
+        self.console.print("[green]✨ Your workshop key has been saved to Santa's vault![/green]")
+        self.console.print("[dim]Stored in ~/.clause-code/.api_key.[/dim]")
         if self.agent:
             await self.agent.set_api_key(api_key)
             self.console.print("[green]🎄 Started a new session with the new key.[/green]")
@@ -127,7 +126,7 @@ class ProjectCommand(Command):
                     path.mkdir(parents=True, exist_ok=True)
                     self.console.print(f"[green]✨ Created folder: {path}[/green]")
                 else:
-                    self.console.print("[yellow]❄️ Cancelled.[/yellow]")
+                    self.console.print("[yellow]Cancelled.[/yellow]")
                     return
 
             if not path.is_dir():
@@ -137,7 +136,7 @@ class ProjectCommand(Command):
             self.config_manager.set_project_folder(str(path))
             if self.agent:
                 await self.agent.set_project(path)
-            self.console.print(f"[bold green]🎁 Project folder set to: {path}[/bold green]")
+            self.console.print(f"[green]🎁 Project folder set to: {path}[/green]")
             self.console.print("[green]🎄 Started a new session in this folder.[/green]")
 
         except OSError as e:
@@ -196,13 +195,11 @@ class ModelCommand(Command):
             self.config_manager.set_model(model_name)
 
             info = MODELS[model_name]
-            self.console.print(
-                f"[bold green]{info['emoji']} Switched to {info['name']}![/bold green]"
-            )
+            self.console.print(f"[green]{info['emoji']} Switched to {info['name']}![/green]")
             self.console.print(f"[green]   {info['description']}[/green]")
         else:
-            self.console.print(f"[red]❌ Unknown model: {model_name}[/red]")
-            self.console.print(f"[yellow]Available: {', '.join(MODELS)}[/yellow]")
+            self.console.print(Text(f"❓ Unknown model: {model_name}", style="yellow"))
+            self.console.print(f"[dim]Models: {', '.join(MODELS)}[/dim]")
 
 
 class SantaCommand(Command):
@@ -237,8 +234,8 @@ class SantaCommand(Command):
         """Execute the command."""
         self.agent.set_festive_mode(True)
         self.config_manager.set_festive_mode(True)
-        self.console.print("\n[bold red]🎅 HO HO HO![/bold red]")
-        self.console.print("[bold green]🎄 Maximum festive mode activated![/bold green]")
+        self.console.print("\n[red]🎅 HO HO HO![/red]")
+        self.console.print("[green]🎄 Maximum festive mode activated![/green]")
         self.console.print("[dim]Claude's own tone follows from the next /clear.[/dim]\n")
 
 
@@ -274,7 +271,7 @@ class GrinchCommand(Command):
         """Execute the command."""
         self.agent.set_festive_mode(False)
         self.config_manager.set_festive_mode(False)
-        self.console.print("\n[dim]⚙️ Minimal mode enabled.[/dim]")
+        self.console.print("\n[dim]Minimal mode on.[/dim]")
         self.console.print("[dim]Claude's own tone follows from the next /clear.[/dim]\n")
 
 
@@ -312,9 +309,7 @@ class AutoAcceptCommand(Command):
 
         await self.agent.set_auto_accept(enabled)
         if enabled:
-            self.console.print(
-                "[bold green]🧝 Auto-accept on: file edits apply without asking.[/bold green]"
-            )
+            self.console.print("[green]🧝 Auto-accept on: file edits apply without asking.[/green]")
             self.console.print(
                 "[dim]Shell commands that change things still ask, and writes outside the project "
                 "are always blocked.[/dim]"
@@ -360,8 +355,8 @@ class AdventCommand(Command):
         1: "🎄 Day 1: Create a function that prints a Christmas tree of any height",
         2: "🎁 Day 2: Build a gift list manager with add, remove, and search features",
         3: "⭐ Day 3: Generate a random Christmas carol lyrics line",
-        4: "🕯️ Day 4: Create an advent calendar countdown that shows days until Christmas",
-        5: "❄️ Day 5: Build a snowflake pattern generator using ASCII art",
+        4: "🔔 Day 4: Create an advent calendar countdown that shows days until Christmas",
+        5: "⛄ Day 5: Build a snowflake pattern generator using ASCII art",
         6: "🎅 Day 6: Create a Santa's nice/naughty list classifier",
         7: "🦌 Day 7: Simulate reindeer racing with random speed calculations",
         8: "🔔 Day 8: Build a musical note player that plays 'Jingle Bells'",
@@ -371,13 +366,13 @@ class AdventCommand(Command):
         12: "🎁 Day 12: Create a secret Santa gift exchange randomizer",
         13: "🌟 Day 13: Build a star constellation display for the night sky",
         14: "🎀 Day 14: Create a gift wrapping calculator for various box sizes",
-        15: "🕊️ Day 15: Simulate the 12 Days of Christmas song generator",
+        15: "🐦 Day 15: Simulate the 12 Days of Christmas song generator",
         16: "🧦 Day 16: Build a stocking stuffer suggestion generator",
         17: "🏠 Day 17: Create a gingerbread house design planner",
         18: "🎺 Day 18: Build a Christmas light pattern animator",
         19: "📜 Day 19: Create a Christmas story generator with random elements",
         20: "🎪 Day 20: Build a toy workshop inventory management system",
-        21: "⛷️ Day 21: Create a winter sports scoreboard tracker",
+        21: "🏂 Day 21: Create a winter sports scoreboard tracker",
         22: "🎭 Day 22: Build a Christmas movie recommendation engine",
         23: "🍷 Day 23: Create a holiday recipe collection with search",
         24: "🌙 Day 24: Build a Christmas Eve countdown timer with animations",
@@ -428,7 +423,7 @@ class AdventCommand(Command):
 
         challenge = self.CHALLENGES[day]
 
-        self.console.print(f"\n[bold green]🎄 Advent Calendar - December {day} 🎄[/bold green]\n")
+        self.console.print(f"\n[green]🎄 Advent Calendar - December {day} 🎄[/green]\n")
         self.console.print(f"[bold]{challenge}[/bold]\n")
 
         self.console.print("[dim]Tips:[/dim]")
@@ -482,31 +477,34 @@ class HelpCommand(Command):
 
     async def execute(self, args: str = "", **kwargs) -> None:
         """Execute the command."""
-        self.console.print("\n[bold green]🎄 Clause Code Commands 🎅[/bold green]\n")
+        self.console.print("\n[bold]🎄 Clause Code commands[/bold]")
+        self.console.print(
+            "[dim]Type a request in plain words; you approve each edit and command.[/dim]"
+        )
 
         for group, names in self.GROUPS.items():
-            self.console.print(f"[bold]{group}:[/bold]")
+            table = self._table()
             for cmd_name in names:
                 if cmd_name in self.commands:
                     cmd = self.commands[cmd_name]
-                    self.console.print(f"  [cyan]/{cmd.name:12}[/cyan] - {cmd.description}")
+                    table.add_row(f"/{cmd.name}", cmd.description)
             if group == "Utility":
-                self.console.print(f"  [cyan]/{'exit, /quit':12}[/cyan] - Exit Clause Code")
-            self.console.print()
+                table.add_row("/exit, /quit", "Exit Clause Code")
+            self.console.print(f"\n[bold]{group}[/bold]")
+            self.console.print(Padding(table, (0, 0, 0, 2)))
 
-        self.console.print("[bold]Tips:[/bold]")
-        self.console.print(
-            "  • Just type naturally - Claude can read, edit, and run code in your project"
-        )
-        self.console.print(
-            "  • You'll be asked before any file edit or any shell command that changes things"
-        )
-        self.console.print(
-            "  • [cyan]/undo[/cyan] rolls back the files Claude edited in its last turn"
-        )
-        self.console.print(
-            "  • [cyan]/cheerlights[/cyan] lights the UI in the color lights worldwide are showing"
-        )
-        self.console.print("  • Try [cyan]/advent[/cyan] for daily December challenges!")
-        self.console.print("  • Press [cyan]Ctrl+C[/cyan] to interrupt Claude mid-turn")
-        self.console.print("  • Press [cyan]Ctrl+D[/cyan] or type [cyan]/exit[/cyan] to quit\n")
+        keys = self._table()
+        keys.add_row("Ctrl+C", "Stop Claude's turn; the conversation stays")
+        keys.add_row("Ctrl+D", "Quit")
+        keys.add_row("Up, Down", "Earlier messages")
+        keys.add_row("Tab", "Complete a command")
+        self.console.print("\n[bold]Keys[/bold]")
+        self.console.print(Padding(keys, (0, 0, 0, 2)))
+        self.console.print()
+
+    @staticmethod
+    def _table() -> Table:
+        table = Table.grid(padding=(0, 2))
+        table.add_column(style="cyan", min_width=14, no_wrap=True)
+        table.add_column()
+        return table

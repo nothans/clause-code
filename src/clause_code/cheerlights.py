@@ -6,7 +6,7 @@ user has Bluesky credentials, sets it the same way people do: with a #cheerlight
 
 Read paths, all public and unauthenticated:
 
-- ThingSpeak channel 1417 over HTTP: the current color and its history.
+- ThingSpeak channel 1417 over HTTPS: the current color and its history.
 - The CheerLights MQTT broker: a push the moment the color changes.
 - Bluesky's public post search: who set the color, when it was set from Bluesky.
 
@@ -26,7 +26,7 @@ import urllib.request
 from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from ._version import __version__
@@ -66,6 +66,9 @@ MATCH_BEFORE_S = 180
 MATCH_AFTER_S = 30
 # How long after a change to look for the Bluesky post behind it (search indexing lags a little).
 ATTRIBUTION_DELAY_S = 4
+# A pushed color carries this computer's clock; ThingSpeak records the same change about a
+# second later on its own clock. Within this margin a ThingSpeak entry is not older than a push.
+CLOCK_MARGIN_S = 10
 
 HttpGet = Callable[[str], Awaitable[Any]]
 HttpPost = Callable[[str, dict, Optional[dict]], Awaitable[Any]]
@@ -154,9 +157,15 @@ def _luminance(rgb: tuple[float, float, float]) -> float:
     return 0.2126 * r + 0.7152 * g + 0.0722 * b
 
 
-# A dark terminal background, and the contrast text needs against it (WCAG AA)
+# Typical dark and light terminal backgrounds (Windows Terminal's Campbell and One Half Light)
 DARK_BACKGROUND = "#0c0c0c"
+LIGHT_BACKGROUND = "#fafafa"
+# WCAG AA for text, used where only a dark background matters (bulbs on the night strip)
 MIN_CONTRAST = 4.5
+# No color reads at 4.5:1 on both a dark and a light background; this much it can
+TEXT_CONTRAST = 3.5
+# Dark ink on a light swatch: charcoal rather than pure black
+DARK_INK = "#252525"
 
 
 def contrast(hex_a: str, hex_b: str) -> float:
@@ -167,14 +176,19 @@ def contrast(hex_a: str, hex_b: str) -> float:
 
 def _rgb(hex_value: str) -> tuple[float, float, float]:
     h = hex_value.lstrip("#")
+    if len(h) != 6:
+        raise ValueError(hex_value)
     return tuple(int(h[i : i + 2], 16) / 255 for i in (0, 2, 4))  # type: ignore[return-value]
 
 
-def readable(hex_value: str) -> str:
-    """The same hue, lightened until text in it reads on a dark terminal.
+def _hex(rgb: tuple[float, ...]) -> str:
+    return "#" + "".join(f"{round(c * 255):02x}" for c in rgb)
 
-    Bulbs and swatches use the real color; text uses this, so blue and purple
-    stay legible.
+
+def glow(hex_value: str) -> str:
+    """The same hue, lightened until it shows against the dark night strip.
+
+    Bulbs are drawn in this, so a blue or purple bulb still glows.
     """
     try:
         r, g, b = _rgb(hex_value)
@@ -182,24 +196,50 @@ def readable(hex_value: str) -> str:
         return hex_value
     for step in range(21):
         mix = step / 20
-        candidate = "#" + "".join(f"{round((c + (1 - c) * mix) * 255):02x}" for c in (r, g, b))
+        candidate = _hex(tuple(c + (1 - c) * mix for c in (r, g, b)))
         if contrast(candidate, DARK_BACKGROUND) >= MIN_CONTRAST:
             return candidate
     return "#ffffff"
 
 
-def ink_for(hex_value: str) -> str:
-    """Black or white, whichever reads better on a background of this color."""
+def readable(hex_value: str) -> str:
+    """The same hue as text that reads on dark and light terminals alike.
+
+    Dark colors are lightened and light ones darkened, just enough for TEXT_CONTRAST
+    against both backgrounds; red, green, and orange stay as they are.
+    """
     try:
-        r, g, b = (int(hex_value.lstrip("#")[i : i + 2], 16) / 255 for i in (0, 2, 4))
+        rgb = _rgb(hex_value)
+    except (ValueError, IndexError):
+        return hex_value
+
+    def reads(candidate: str) -> bool:
+        return (
+            contrast(candidate, DARK_BACKGROUND) >= TEXT_CONTRAST
+            and contrast(candidate, LIGHT_BACKGROUND) >= TEXT_CONTRAST
+        )
+
+    if reads(hex_value):
+        return hex_value.lower()
+    too_dark = contrast(hex_value, DARK_BACKGROUND) < TEXT_CONTRAST
+    for step in range(1, 101):
+        mix = step / 100
+        if too_dark:
+            candidate = _hex(tuple(c + (1 - c) * mix for c in rgb))
+        else:
+            candidate = _hex(tuple(c * (1 - mix) for c in rgb))
+        if reads(candidate):
+            return candidate
+    return "#808080"
+
+
+def ink_for(hex_value: str) -> str:
+    """Dark or white ink, whichever reads better on a background of this color."""
+    try:
+        luminance = _luminance(_rgb(hex_value))
     except (ValueError, IndexError):
         return "#ffffff"
-
-    def channel(c: float) -> float:
-        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
-
-    luminance = 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
-    return "#000000" if luminance > 0.25 else "#ffffff"
+    return DARK_INK if luminance > 0.25 else "#ffffff"
 
 
 # Oldlace is also written "old lace" or "old-lace", as the CheerLights Bluesky service reads it.
@@ -506,6 +546,7 @@ class CheerLights:
         self._mqtt_up = False
         self._tasks: set[asyncio.Task] = set()
         self._poller: Optional[asyncio.Task] = None
+        self._pushes = 0  # numbers each push, so a slow check cannot undo a newer one
         self._lock = threading.Lock()
 
     def now(self) -> datetime:
@@ -619,10 +660,27 @@ class CheerLights:
                 continue
             self.error = None
             self.status = "polling"
-            if self.current is None or color.entry_id != self.current.entry_id:
+            if self._is_newer(color):
                 changed = self.current is not None and color.name != self.current.name
                 self._set(color, record=changed)
                 self._spawn(self._attribute(color, delay=0))
+
+    def _is_newer(self, color: Color) -> bool:
+        """Whether a color read from ThingSpeak is a later change than the one showing.
+
+        Entry numbers decide when both colors have one. A color from a push has none
+        until ThingSpeak records it, so its time decides, with a margin for the two clocks.
+        """
+        current = self.current
+        if current is None:
+            return True
+        if current.entry_id is not None and color.entry_id is not None:
+            return color.entry_id > current.entry_id
+        if current.entry_id is None and color.entry_id is None:
+            return False  # nothing to say this read is any later
+        if current.set_at is not None and color.set_at is not None:
+            return color.set_at >= current.set_at - timedelta(seconds=CLOCK_MARGIN_S)
+        return color.entry_id is not None
 
     def _from_thread_color(self, name: str) -> None:
         loop = self._loop
@@ -644,16 +702,20 @@ class CheerLights:
             self.status = "polling"
 
     async def _on_pushed(self, name: str) -> None:
+        self._pushes += 1
+        push = self._pushes
         if self.current is not None and name == self.current.name:
             return  # The broker repeats the retained color on every (re)connect
         # ThingSpeak has the time the color was set; use it when it agrees with the push.
         color = Color(name=name, hex=PALETTE.get(name, ""), set_at=self._now())
         try:
             fetched = await self.fetch_current()
-            if fetched.name == name:
+            if fetched.name == name and self._is_newer(fetched):
                 color = fetched
         except CheerLightsUnavailable:
             pass
+        if push != self._pushes:
+            return  # A later push arrived while ThingSpeak answered; it is the color now
         if not color.hex:
             return  # A name outside the palette with no hex to show
         first = self.current is None
@@ -746,7 +808,9 @@ __all__ = [
     "ago",
     "build_post",
     "colors_in",
+    "glow",
     "ink_for",
+    "readable",
     "light_string",
     "match_setter",
     "parse_entry",

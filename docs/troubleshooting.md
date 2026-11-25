@@ -21,12 +21,33 @@ uv sync --reinstall-package claude-agent-sdk
 
 ## "Command not found: clause-code"
 
-Run it through uv from the repository folder, or as a module from an activated environment:
+`clause-code` is on the PATH only inside the project's environment.
+Run it through uv from the repository folder:
 
 ```bash
 uv run clause-code
-python -m clause_code
 ```
+
+To run it from any folder, install it as a uv tool from the repository folder:
+
+```bash
+uv tool install .
+```
+
+## Boxes, gaps, or characters like `Γ¥î` in the output
+
+Clause Code writes piped and redirected output as UTF-8.
+A program that reads it in a legacy code page shows each emoji as two or three wrong characters, as `more` does in a console on code page 437.
+Switch the console to UTF-8, or ask for ASCII:
+
+```bash
+chcp 65001                                         # Windows: the console reads UTF-8
+CLAUSE_CODE_ASCII=1 uv run clause-code             # macOS, Linux: ASCII only
+```
+
+In PowerShell, set `$env:CLAUSE_CODE_ASCII = "1"` before starting.
+ASCII mode also helps a terminal whose font has no emoji, where they show as boxes.
+See [Unicode output](configuration.md#unicode-output) for how the encoding is chosen.
 
 ## The status line says the lights are out of reach
 

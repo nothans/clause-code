@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Clause Code social card</title>
+<link href="https://fonts.googleapis.com/css2?family=Oxygen:wght@400;700&display=block" rel="stylesheet">
+<style>
+  /* GitHub social preview for nothans/clause-code, 1280 x 640, in the NotHans house style:
+     charcoal ground, a white plain-words headline, the NotHans Blue bar, one subject drawn as
+     flat shapes, and the NotHans.com mark bottom right.
+     Render: open over http or file in a 1280 x 640 viewport at device scale 1, wait for fonts,
+     and screenshot the page to ../social-card.png. Upload it in the repository's Settings,
+     under Social preview. */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1280px; height: 640px; overflow: hidden; background: #252525; }
+  .stage {
+    position: relative; width: 1280px; height: 640px; overflow: hidden;
+    padding: 108px 0 0 72px; font-family: "Oxygen", Arial, sans-serif; color: #FFFFFF;
+  }
+  h1 { font-size: 112px; font-weight: 700; line-height: 1; letter-spacing: -0.015em; }
+  .bar { width: 110px; height: 12px; border-radius: 3px; background: #1585B5; margin: 34px 0 30px; }
+  .sub { font-size: 42px; line-height: 1.25; color: #E5E5E5; max-width: 540px; text-wrap: balance; }
+  .mark { position: absolute; right: 48px; bottom: 36px; font-size: 26px; font-weight: 700; color: #E5E5E5; }
+  svg.art { position: absolute; left: 730px; top: 0; width: 550px; height: 560px; }
+</style>
+</head>
+<body>
+<div class="stage">
+  <h1>Clause Code</h1>
+  <div class="bar"></div>
+  <div class="sub">A holiday coding agent for your terminal</div>
+
+  <!-- A terminal window with a string of lights along its top edge. Rows of output are bars:
+       the prompt with its bulb, two tool lines, an approval box with a diff, and the green
+       line of a finished turn. -->
+  <svg class="art" viewBox="0 0 550 560" aria-hidden="true">
+    <!-- the window, running off the right edge -->
+    <rect x="20" y="160" width="600" height="370" rx="22" fill="#F3F5F3"/>
+    <circle cx="70" cy="232" r="13" fill="#1585B5"/>
+    <rect x="102" y="221" width="280" height="22" rx="5" fill="#252525"/>
+    <rect x="58" y="276" width="40" height="18" rx="4" fill="#1585B5"/>
+    <rect x="110" y="276" width="200" height="18" rx="4" fill="#8C8C8C"/>
+    <rect x="58" y="310" width="40" height="18" rx="4" fill="#1585B5"/>
+    <rect x="110" y="310" width="240" height="18" rx="4" fill="#8C8C8C"/>
+    <rect x="58" y="350" width="450" height="104" rx="10" fill="none" stroke="#252525" stroke-width="5"/>
+    <rect x="82" y="374" width="220" height="16" rx="4" fill="#B52315"/>
+    <rect x="82" y="408" width="290" height="16" rx="4" fill="#15B545"/>
+    <rect x="58" y="480" width="260" height="22" rx="5" fill="#15B545"/>
+
+    <!-- the wire, hung from hooks above the window; bulbs are placed on it below -->
+    <path id="wire" d="M 0 96 Q 92 158 184 108 Q 276 160 368 108 Q 460 160 552 102"
+          fill="none" stroke="#8C8C8C" stroke-width="5" stroke-linecap="round"/>
+    <g id="bulbs"></g>
+  </svg>
+
+  <div class="mark">NotHans.com</div>
+</div>
+<script>
+  // Hang each bulb straight down from its point on the wire: a socket, then the glass
+  const wire = document.getElementById("wire");
+  const bulbs = document.getElementById("bulbs");
+  const colors = ["#B52315", "#15B545", "#1585B5", "#B52315", "#15B545", "#1585B5"];
+  const length = wire.getTotalLength();
+  colors.forEach((color, i) => {
+    const at = wire.getPointAtLength(length * (i + 0.5) / colors.length);
+    const svg = "http://www.w3.org/2000/svg";
+    const socket = document.createElementNS(svg, "rect");
+    Object.entries({ x: at.x - 8, y: at.y - 2, width: 16, height: 15, rx: 3, fill: "#8C8C8C" })
+      .forEach(([k, v]) => socket.setAttribute(k, v));
+    const glass = document.createElementNS(svg, "ellipse");
+    Object.entries({ cx: at.x, cy: at.y + 32, rx: 15, ry: 20, fill: color })
+      .forEach(([k, v]) => glass.setAttribute(k, v));
+    bulbs.append(socket, glass);
+  });
+</script>
+</body>
+</html>

@@ -15,23 +15,28 @@ from ..cheerlights import (
     CheerLightsUnavailable,
     Color,
     Setter,
-    light_string,
+    glow,
+    ink_for,
     readable,
 )
-from ..theme import snowfall
+from ..theme import NIGHT, chip, snowfall, strand
 from ..utils.config import ConfigManager
 from .base import Command
+
+
+def color_chip(name: str, hex_value: str) -> Text:
+    """A color's name on a swatch of the color."""
+    return chip(name, hex_value, ink_for(hex_value))
 
 
 def color_line(cheerlights: CheerLights, color: Color, setter: Optional[Setter]) -> Text:
     """The lights in their color, then what color it is, since when, and who set it."""
     line = Text("  ")
-    line.append(light_string(), style=f"bold {color.hex}")
+    line.append_text(strand(glow(color.hex)))
     line.append("  ")
-    line.append(color.name, style=f"bold {readable(color.hex)}")
-    line.append(f" {color.hex}", style="dim")
+    line.append_text(color_chip(color.name, color.hex))
     rest = cheerlights.describe(color, setter).split(" · ", 1)[1]
-    line.append(f" · {rest}", style="dim")
+    line.append(f"  {color.hex} · {rest}", style="dim")
     return line
 
 
@@ -130,20 +135,21 @@ class CheerLightsCommand(Command):
         try:
             colors = await self.cheerlights.fetch_history(count)
         except CheerLightsUnavailable as e:
-            self.console.print(Text(f"❄️ CheerLights history is out of reach: {e}", style="yellow"))
+            self.console.print(Text(f"🧊 CheerLights history is out of reach: {e}", style="yellow"))
             return
         if not colors:
             self.console.print("[dim]No history came back.[/dim]")
             return
         strip = Text("  ")
+        strip.append(" ", style=f"on {NIGHT}")
         for color in colors:
-            strip.append("● ", style=f"bold {color.hex}")
+            strip.append("● ", style=f"bold {glow(color.hex)} on {NIGHT}")
         self.console.print(f"\n[bold]🎄 The last {len(colors)} colors, oldest first[/bold]")
         self.console.print(strip)
         for color in colors[-12:]:
             when = color.set_at.astimezone().strftime("%a %H:%M") if color.set_at else "?"
             line = Text(f"  {when}  ", style="dim")
-            line.append(color.name, style=f"bold {readable(color.hex)}")
+            line.append_text(color_chip(color.name, color.hex))
             self.console.print(line)
         self.console.print()
 
@@ -158,11 +164,11 @@ class CheerLightsCommand(Command):
         try:
             url = await self.cheerlights.set_color(color)
         except (ValueError, CheerLightsUnavailable) as e:
-            self.console.print(Text(f"❄️ The color was not set: {e}", style="yellow"))
+            self.console.print(Text(f"🧊 The color was not set: {e}", style="yellow"))
             return
-        line = Text("✨ Posted. ", style="bold green")
+        line = Text("✨ Posted. ", style="green")
         line.append("The lights should turn ", style="green")
-        line.append(color, style=f"bold {readable(PALETTE[color])}")
+        line.append_text(color_chip(color, PALETTE[color]))
         line.append(" in a few seconds.", style="green")
         self.console.print(line)
         self.console.print(Text(f"   {url}", style="dim"))
@@ -198,11 +204,13 @@ class SnowCommand(Command):
             return
         width = max(min(self.console.width - 2, 72), 10)
         frames = snowfall(width, 8, int(self.SECONDS * self.FPS))
-        style = self.accent() or "white"
+        accent = self.accent()
+        style = readable(accent) if accent else ""
         with Live(console=self.console, transient=True, refresh_per_second=self.FPS) as live:
             for frame in frames:
                 text = Text("\n".join(frame[:-1]) + "\n", style=style)
-                text.append(frame[-1], style="bold white")
+                text.append(frame[-1], style="bold")
                 live.update(text)
                 await asyncio.sleep(1 / self.FPS)
-        self.console.print(Text("❄️ " * min(width // 3, 20), style=style))
+        # The snow that settled stays behind
+        self.console.print(Text(frames[-1][-1].rstrip() or "█", style="bold"))

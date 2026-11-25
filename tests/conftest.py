@@ -1,5 +1,6 @@
 """Pytest configuration and fixtures."""
 
+import io
 import tempfile
 from pathlib import Path
 from unittest.mock import Mock
@@ -14,6 +15,13 @@ from clause_code.utils.config import ConfigManager
 def no_env_api_key(monkeypatch):
     """Keep a real ANTHROPIC_API_KEY in the environment out of the tests."""
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def no_env_output_settings(monkeypatch):
+    """Keep the shell's output settings out of the tests: the app honors these on purpose."""
+    for name in ("PYTHONIOENCODING", "CLAUSE_CODE_ASCII", "TERM"):
+        monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture
@@ -45,8 +53,13 @@ def mock_console():
 
 @pytest.fixture
 def recording_console():
-    """A real Rich console that records plain-text output."""
-    return Console(record=True, width=120, force_terminal=False, color_system=None)
+    """A real Rich console that records plain-text output.
+
+    It writes to memory, so its encoding is UTF-8 whatever pytest does with stdout.
+    """
+    return Console(
+        file=io.StringIO(), record=True, width=120, force_terminal=False, color_system=None
+    )
 
 
 @pytest.fixture

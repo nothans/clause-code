@@ -43,17 +43,11 @@ class TestFestiveTheme:
             assert isinstance(message, str)
             assert len(message) > 0
 
-    def test_welcome_tree_exists(self):
-        """Test that welcome tree ASCII art is defined."""
-        assert isinstance(FestiveTheme.WELCOME_TREE, str)
-        assert len(FestiveTheme.WELCOME_TREE) > 0
-        assert "🌟" in FestiveTheme.WELCOME_TREE
-
-    def test_welcome_banner_exists(self):
-        """Test that welcome banner is defined."""
-        assert isinstance(FestiveTheme.WELCOME_BANNER, str)
-        assert len(FestiveTheme.WELCOME_BANNER) > 0
-        assert "Clause Code" in FestiveTheme.WELCOME_BANNER
+    def test_prompt_and_ready_line(self):
+        assert FestiveTheme.prompt == "🎅 > "
+        assert FestiveTheme.ready.startswith("🎄 Ready!")
+        assert GrinchTheme.prompt == "> "
+        assert GrinchTheme.ready.isascii()
 
     def test_get_thinking_state(self):
         """Test getting a random thinking state."""
@@ -107,8 +101,7 @@ class TestGrinchTheme:
         state = GrinchTheme.get_thinking_state()
 
         assert isinstance(state, str)
-        assert "Processing" in state
-        assert "⚙️" in state
+        assert state == "Working..."
 
     def test_get_success_message(self):
         """Test Grinch theme success message."""
@@ -188,7 +181,7 @@ class TestChristmas:
 
         from clause_code.theme import christmas_countdown
 
-        assert christmas_countdown(date(2026, 11, 24)) == "🎄 31 sleeps until Christmas"
+        assert christmas_countdown(date(2026, 11, 24)) == "31 sleeps until Christmas"
         assert "one more sleep" in christmas_countdown(date(2026, 12, 24))
         assert "Merry Christmas" in christmas_countdown(date(2026, 12, 25))
 
@@ -216,3 +209,107 @@ class TestSnowfall:
         )
         assert FestiveTheme.get_tool_label("PowerShell") == "🔔 Running"
         assert GrinchTheme.get_compaction_label() == "Conversation compacted"
+
+
+class TestDrawing:
+    """The tree, the string of lights, and the color chip."""
+
+    def test_tree_is_symmetric_and_single_width(self):
+        from rich.cells import cell_len
+
+        from clause_code.theme import christmas_tree
+
+        rows = christmas_tree(5).plain.split("\n")
+        assert rows[0].strip() == "★"
+        assert rows[1].strip() == "/●\\"
+        assert rows[5].strip() == "/● ● ● ● ●\\"
+        for row in rows:
+            # Every character is one cell, so the tree lines up in any terminal
+            assert cell_len(row) == len(row)
+            # Centered on the same column as the star
+            assert len(row) - len(row.lstrip()) + len(row.strip()) // 2 == 5
+
+    def test_tree_bulbs_take_turns(self):
+        from clause_code.theme import ORNAMENTS, christmas_tree
+
+        tree = christmas_tree(3)
+        bulbs = [span.style for span in tree.spans if tree.plain[span.start] == "●"]
+        assert bulbs == [ORNAMENTS[i % len(ORNAMENTS)] for i in range(6)]
+
+    def test_strand_hangs_on_the_night_strip(self):
+        from clause_code.theme import NIGHT, strand
+
+        line = strand("#ffffff", 3)
+        assert line.plain == " ●─●─● "
+        assert all(f"on {NIGHT}" in str(span.style) for span in line.spans)
+
+    def test_chip(self):
+        from clause_code.theme import chip
+
+        swatch = chip("red", "#ff0000", "#ffffff")
+        assert swatch.plain == " red "
+        assert swatch.style == "bold #ffffff on #ff0000"
+
+
+class TestGlyphWidths:
+    """Regression: emoji such as the map and the scissors need a variation selector to
+    look like emoji. Rich counted them one cell wide while Windows Terminal drew them two
+    wide, so the label ran into them ("🗺️Mapping"). Every emoji the app prints must be
+    wide by default, and no string may lean on a variation selector."""
+
+    # Narrow symbols that every terminal tested draws one cell wide
+    NARROW = set("●○★─━═│█▀▌▐░•·…→←↳✓✗")
+
+    def strings(self):
+        import ast
+        import pathlib
+
+        import clause_code
+
+        root = pathlib.Path(clause_code.__file__).parent
+        for path in root.rglob("*.py"):
+            if path.name == "terminal.py":
+                continue  # the fallback table names glyphs it does not print
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                    yield path.name, node.value
+
+    def test_no_variation_selectors(self):
+        offenders = [(name, s) for name, s in self.strings() if "\ufe0f" in s or "\ufe0e" in s]
+        assert offenders == []
+
+    def test_every_symbol_is_wide_or_known_narrow(self):
+        import unicodedata
+
+        offenders = set()
+        for name, text in self.strings():
+            for char in text:
+                if char.isascii() or char in self.NARROW:
+                    continue
+                if unicodedata.category(char).startswith("S"):
+                    if unicodedata.east_asian_width(char) != "W":
+                        offenders.add((name, char, unicodedata.name(char, "?")))
+        assert offenders == set()
+
+
+class TestLightThemes:
+    """Regression: terminals draw bold ANSI colors in their bright variant, and bright green
+    on a light background reads at about 2:1 ("Ready!" and "Plan mode on." all but vanished).
+    Bold goes with the default text color only; colored text stays regular weight."""
+
+    def test_no_bold_named_colors(self):
+        import ast
+        import pathlib
+        import re
+
+        import clause_code
+
+        pattern = re.compile(r"bold (green|red|yellow|blue|magenta|cyan|white)\b")
+        root = pathlib.Path(clause_code.__file__).parent
+        offenders = []
+        for path in root.rglob("*.py"):
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                    if pattern.search(node.value):
+                        offenders.append((path.name, node.value[:60]))
+        assert offenders == []

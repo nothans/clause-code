@@ -365,9 +365,10 @@ class TestCheerLightsMode:
         styled = color_console.export_text(styles=True, clear=False)
         text = color_console.export_text()
         assert "●─●─●" in text
-        assert "Lights around the world are cyan right now." in text
-        # The success line and the bulbs take the live color
-        assert "38;2;0;255;255" in styled
+        assert "Lights around the world are  cyan  right now." in text
+        # The bulbs glow in the live color on the dark strip; the name sits on a swatch
+        assert "1;38;2;0;255;255;48;2;37;37;37m" in styled
+        assert "48;2;0;255;255m cyan " in styled
 
     def test_changes_during_the_turn(self, color_console, project_folder, cheer):
         from clause_code.cheerlights import PALETTE, Change, Color
@@ -379,7 +380,7 @@ class TestCheerLightsMode:
 
         renderer.handle(result())
 
-        assert "While you worked, the lights went red → green → blue" in (
+        assert "While you worked, the lights went  red  →  green  →  blue " in (
             color_console.export_text()
         )
 
@@ -406,7 +407,8 @@ class TestCheerLightsMode:
         renderer.handle(result(is_error=True, subtype="error_during_execution"))
         assert "●" not in color_console.export_text()
 
-    def test_tool_label_takes_the_color(self, color_console, project_folder, cheer):
+    def test_spinner_takes_the_color_but_labels_do_not(self, color_console, project_folder, cheer):
+        """A red light must not make a tool line or a finished turn look like an error."""
         renderer = self.lit(color_console, FestiveTheme, project_folder, cheer)
 
         renderer.handle(
@@ -416,7 +418,8 @@ class TestCheerLightsMode:
 
         styled = color_console.export_text(styles=True, clear=False)
         assert "Checking the lights" in color_console.export_text()
-        assert "38;2;0;255;255" in styled
+        assert "\x1b[36m🎄 Checking the lights" in styled  # the label stays cyan
+        assert "38;2;0;148;148m" in styled  # the spinner, in cyan that reads on any theme
 
 
 class TestQuietPlumbing:
@@ -490,7 +493,7 @@ class TestBackgroundWaits:
 
 
 class TestReadableAccent:
-    def test_blue_text_is_lightened_but_bulbs_stay_blue(self, project_folder):
+    def test_blue_bulbs_glow_and_the_swatch_stays_blue(self, project_folder):
         from datetime import datetime, timezone
 
         from rich.console import Console
@@ -505,5 +508,20 @@ class TestReadableAccent:
         renderer.handle(result())
 
         styled = console.export_text(styles=True)
-        assert "38;2;102;102;255" in styled  # the footer, in readable blue
-        assert "38;2;0;0;255" in styled  # the bulbs, in true blue
+        assert "38;2;102;102;255" in styled  # the bulbs, lightened to glow on the strip
+        assert "48;2;0;0;255m blue " in styled  # the name, on a swatch of true blue
+
+
+class TestFooterStyle:
+    def test_stats_are_not_tinted_by_the_success_color(self, project_folder):
+        """Regression: the time and cost inherited the green line and read at about 2.5:1."""
+        from rich.console import Console
+
+        console = Console(record=True, width=120, force_terminal=True, color_system="truecolor")
+        renderer = TurnRenderer(console, GrinchTheme, lambda: project_folder)
+
+        renderer.handle(result())
+
+        styled = console.export_text(styles=True)
+        assert "\x1b[32m✓ Done\x1b[0m" in styled
+        assert "\x1b[2m  2.5s · $0.0123\x1b[0m" in styled
