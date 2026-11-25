@@ -1,14 +1,19 @@
 """Render Claude Agent SDK messages in the terminal."""
 
 from collections.abc import Callable
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
 from claude_agent_sdk import (
     AssistantMessage,
     Message,
+    RateLimitEvent,
     ResultMessage,
     StreamEvent,
+    SystemMessage,
+    TaskNotificationMessage,
+    TaskStartedMessage,
     TextBlock,
     ToolUseBlock,
 )
@@ -18,7 +23,8 @@ from rich.markdown import Markdown
 from rich.status import Status
 from rich.text import Text
 
-from .permissions import display_path
+from .cheerlights import CheerLights, light_string, readable
+from .permissions import display_path, is_plan_file
 
 API_ERRORS = {
     "authentication_failed": "🔑 Authentication failed. Check your API key with /setkey.",
@@ -44,10 +50,16 @@ def summarize_tool_input(tool_name: str, tool_input: dict[str, Any], root: Path)
     Returns:
         Short description such as a path, command, or search pattern
     """
+    if tool_name == "ToolSearch":
+        # "select:mcp__cheerlights__get_color,ExitPlanMode" -> "get_color, ExitPlanMode"
+        query = str(tool_input.get("query", "")).removeprefix("select:")
+        return ", ".join(name.rsplit("__", 1)[-1] for name in query.split(",") if name)
     for key in ("file_path", "notebook_path"):
         if tool_input.get(key):
+            if is_plan_file(tool_input[key]):
+                return Path(tool_input[key]).name
             return display_path(tool_input[key], root)
-    for key in ("command", "pattern", "url", "query", "description"):
+    for key in ("command", "pattern", "url", "query", "description", "color"):
         if tool_input.get(key):
             value = str(tool_input[key]).strip().splitlines()[0]
             if len(value) > SUMMARY_WIDTH:
@@ -63,17 +75,36 @@ class TurnRenderer:
     so brackets in code (``arr[i]``, ``x[/]``) print as written.
     """
 
-    def __init__(self, console: Console, theme, get_root: Callable[[], Path]):
+    def __init__(
+        self,
+        console: Console,
+        theme,
+        get_root: Callable[[], Path],
+        *,
+        cheerlights: Optional[CheerLights] = None,
+        background: Callable[[], dict[str, str]] = dict,
+    ):
         """Initialize renderer.
 
         Args:
             console: Rich console for output
             theme: FestiveTheme or GrinchTheme
             get_root: Returns the current project folder
+            cheerlights: When set (CheerLights mode), the UI takes the live color and the
+                end of a turn shows what the lights did meanwhile
+            background: Returns the background tasks the turn is still waiting for
         """
         self.console = console
         self.theme = theme
         self.get_root = get_root
+        self.cheerlights = cheerlights
+        self.background = background
+        self._started = datetime.now(timezone.utc)
+        # A turn can span several results when it waits for background work
+        self._spent_ms = 0
+        self._spent_usd: Optional[float] = None
+        # Subagent lines that arrived mid-sentence, shown when the sentence ends
+        self._after_text: list = []
         self._status: Optional[Status] = None
         self._live: Optional[Live] = None
         self._buffer = ""
@@ -91,7 +122,8 @@ class TurnRenderer:
             return
         if self._status is None and self._live is None:
             self._status = self.console.status(
-                Text(self.theme.get_thinking_state(), style="italic green")
+                Text(self.theme.get_thinking_state(), style=f"italic {self._accent('green')}"),
+                spinner_style=self._accent("green"),
             )
             self._status.start()
 
@@ -163,6 +195,16 @@ class TurnRenderer:
         if self._buffer.strip():
             self._print(Markdown(self._buffer))
         self._buffer = ""
+        for line in self._after_text:
+            self._print(line)
+        self._after_text.clear()
+
+    def _accent(self, default: str) -> str:
+        """The live CheerLights color in CheerLights mode, otherwise the theme's color."""
+        if self.cheerlights is not None and self.cheerlights.current is not None:
+            hex_value = self.cheerlights.current.hex
+            return readable(hex_value) if hex_value else default
+        return default
 
     # Messages
 
@@ -174,6 +216,47 @@ class TurnRenderer:
             self._handle_assistant(message)
         elif isinstance(message, ResultMessage):
             self._handle_result(message)
+        elif isinstance(message, (TaskStartedMessage, TaskNotificationMessage)):
+            self._handle_task(message)
+        elif isinstance(message, SystemMessage) and message.subtype == "compact_boundary":
+            self._handle_compaction(message)
+        elif isinstance(message, RateLimitEvent):
+            self._handle_rate_limit(message)
+
+    def _notice(self, text: str, style: str = "dim") -> None:
+        self.pause()
+        self._print(Text(text, style=style))
+        self.start()
+
+    def _handle_task(self, message) -> None:
+        if isinstance(message, TaskStartedMessage):
+            label = self.theme.get_task_label("started")
+            self._notice(f"{label} {message.description or message.task_id}")
+        else:
+            label = self.theme.get_task_label(message.status)
+            summary = (message.summary or "").strip().splitlines()
+            self._notice(f"{label} {summary[0] if summary else message.task_id}")
+
+    def _handle_compaction(self, message: SystemMessage) -> None:
+        # Compaction drops detail from the conversation; never let it happen silently
+        meta = message.data.get("compact_metadata") or {}
+        before, after = meta.get("pre_tokens"), meta.get("post_tokens")
+        sizes = f" ({before:,} → {after:,} tokens)" if before and after else ""
+        how = "you asked" if meta.get("trigger") == "manual" else "the context was filling up"
+        self._notice(
+            f"{self.theme.get_compaction_label()}{sizes}, because {how}. "
+            "Earlier details are now a summary; restate anything that matters.",
+            style="yellow",
+        )
+
+    def _handle_rate_limit(self, message: RateLimitEvent) -> None:
+        info = message.rate_limit_info
+        if info.get("status") == "rejected":
+            self._notice("⏱️ Rate limit reached; Claude is waiting for it to reset.", "yellow")
+        elif info.get("status") == "allowed_warning":
+            used = info.get("utilization")
+            share = f" ({used:.0%} used)" if isinstance(used, (int, float)) else ""
+            self._notice(f"⏱️ Getting close to a rate limit{share}.", "yellow")
 
     def _handle_stream_event(self, message: StreamEvent) -> None:
         if message.parent_tool_use_id:
@@ -210,6 +293,10 @@ class TurnRenderer:
                 self._print(Markdown(block.text))
                 self.start()
             elif isinstance(block, ToolUseBlock):
+                if subagent and self._buffer:
+                    # Don't cut Claude's sentence in half with a subagent's step
+                    self._after_text.append(self._tool_line(block, subagent))
+                    continue
                 self.pause()
                 self._print(self._tool_line(block, subagent))
                 self.start()
@@ -219,7 +306,10 @@ class TurnRenderer:
         line = Text(style="dim" if subagent else "")
         if subagent:
             line.append("  ↳ ")
-        line.append(self.theme.get_tool_label(block.name), style="cyan")
+        name = block.name
+        if name in ("Write", "Edit") and is_plan_file(block.input.get("file_path", "")):
+            name = "PlanFile"
+        line.append(self.theme.get_tool_label(name), style=self._accent("cyan"))
         summary = summarize_tool_input(block.name, block.input, self.get_root())
         if summary:
             line.append(" ")
@@ -239,10 +329,46 @@ class TurnRenderer:
                 self.console.print(Text(error, style="red"))
             return
 
-        stats = [f"{message.duration_ms / 1000:.1f}s"]
+        self._spent_ms += message.duration_ms or 0
         if message.total_cost_usd is not None:
-            stats.append(f"${message.total_cost_usd:.4f}")
-        footer = Text(self.theme.get_success_message(), style="green")
+            self._spent_usd = (self._spent_usd or 0) + message.total_cost_usd
+        waiting = self.background()
+        if waiting:
+            first = next(iter(waiting.values())) or "a background task"
+            more = f" and {len(waiting) - 1} more" if len(waiting) > 1 else ""
+            self.console.print(
+                Text(
+                    f"{self.theme.get_task_label('waiting')} {first}{more} · Ctrl+C stops it",
+                    style="dim",
+                )
+            )
+            self.start()
+            return
+
+        stats = [f"{self._spent_ms / 1000:.1f}s"]
+        if self._spent_usd is not None:
+            stats.append(f"${self._spent_usd:.4f}")
+        footer = Text(self.theme.get_success_message(), style=self._accent("green"))
         footer.append("  " + " · ".join(stats), style="dim")
         self.console.print(footer)
+        self._show_lights()
         self.console.print()
+
+    def _show_lights(self) -> None:
+        """In CheerLights mode, end a finished task with the lights as they are right now."""
+        cheer = self.cheerlights
+        if cheer is None or cheer.current is None:
+            return
+        color = cheer.current
+        line = Text("  ")
+        line.append(light_string(), style=f"bold {color.hex}")
+        changes = cheer.changes_since(self._started)
+        if changes:
+            line.append("  While you worked, the lights went ", style="dim")
+            for i, change in enumerate(changes[-6:]):
+                if i:
+                    line.append(" → ", style="dim")
+                line.append(change.name, style=f"bold {readable(change.hex)}")
+        else:
+            line.append(f"  Lights around the world are {color.name} right now.", style="dim")
+        self.console.print(line)

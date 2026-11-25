@@ -19,9 +19,10 @@ class ClauseConfig(BaseModel):
 
     default_model: str = Field(default="opus", pattern="^(opus|sonnet|haiku)$")
     festive_mode: bool = True
+    cheerlights_mode: bool = False
     project_folder: Optional[str] = None
 
-    @field_validator("festive_mode", mode="before")
+    @field_validator("festive_mode", "cheerlights_mode", mode="before")
     @classmethod
     def validate_festive_mode(cls, v):
         """Validate and convert festive_mode to boolean."""
@@ -160,4 +161,18 @@ class ConfigManager:
         """
         config = self.load()
         config.festive_mode = enabled
+        self.save(config)
+
+    def is_cheerlights_mode(self) -> bool:
+        """Check if CheerLights mode is on."""
+        return self.load().cheerlights_mode
+
+    def set_cheerlights_mode(self, enabled: bool) -> None:
+        """Turn CheerLights mode on or off.
+
+        Args:
+            enabled: Whether the UI follows the live CheerLights color
+        """
+        config = self.load()
+        config.cheerlights_mode = enabled
         self.save(config)

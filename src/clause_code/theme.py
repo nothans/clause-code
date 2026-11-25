@@ -1,7 +1,65 @@
 """Festive theming and messages for Clause Code."""
 
 import random
-from typing import List, Tuple
+from datetime import date
+from typing import List, Optional, Tuple
+
+TASK_STATES = {
+    "started": "🧝 An elf started on",
+    "completed": "🧝 An elf finished:",
+    "failed": "🧝 An elf hit a snag:",
+    "stopped": "🧝 An elf was called back:",
+    "waiting": "🧝 Waiting for an elf:",
+}
+
+
+def sleeps_until_christmas(today: date) -> int:
+    """Days from today until the next December 25 (0 on Christmas Day)."""
+    christmas = date(today.year, 12, 25)
+    if today > christmas:
+        christmas = date(today.year + 1, 12, 25)
+    return (christmas - today).days
+
+
+def christmas_countdown(today: date) -> str:
+    """A line for the welcome screen."""
+    sleeps = sleeps_until_christmas(today)
+    if sleeps == 0:
+        return "🎁 Merry Christmas!"
+    if sleeps == 1:
+        return "🌟 Christmas Eve: one more sleep!"
+    return f"🎄 {sleeps} sleeps until Christmas"
+
+
+def snowfall(width: int, height: int, frames: int, seed: Optional[int] = None) -> List[List[str]]:
+    """Frames of falling snow, each a list of text rows.
+
+    Flakes fall one row per frame and drift a little; snow that lands builds up on
+    the bottom row.
+    """
+    rng = random.Random(seed)
+    flakes: List[List[int]] = []  # [column, row]
+    ground = [0] * width
+    shapes = "*❄·+"
+    out: List[List[str]] = []
+    for _ in range(frames):
+        for _ in range(max(width // 12, 1)):
+            flakes.append([rng.randrange(width), 0])
+        moved = []
+        for col, row in flakes:
+            col = min(max(col + rng.choice((-1, 0, 0, 1)), 0), width - 1)
+            row += 1
+            if row >= height - 1:
+                ground[col] = 1
+            else:
+                moved.append([col, row])
+        flakes = moved
+        grid = [[" "] * width for _ in range(height)]
+        for col, row in flakes:
+            grid[row][col] = shapes[(col + row) % len(shapes)]
+        grid[height - 1] = ["█" if g else " " for g in ground]
+        out.append(["".join(r) for r in grid])
+    return out
 
 
 class FestiveTheme:
@@ -67,6 +125,13 @@ class FestiveTheme:
         "Agent": "🧝 Sending an elf to",
         "Task": "🧝 Sending an elf to",
         "TodoWrite": "📋 Updating the list",
+        "PowerShell": "🔔 Running",
+        "ExitPlanMode": "🗺️ Handing over the plan",
+        "PlanFile": "🗺️ Sketching the plan",
+        "ToolSearch": "🧰 Unpacking",
+        "mcp__cheerlights__get_color": "🎄 Checking the lights",
+        "mcp__cheerlights__get_history": "🎄 Reading the lights' diary",
+        "mcp__cheerlights__set_color": "🎄 Changing the lights to",
     }
 
     WELCOME_TREE = """
@@ -140,6 +205,16 @@ class FestiveTheme:
         """
         return cls.TOOL_LABELS.get(tool_name, f"🛠️ Using {tool_name}")
 
+    @classmethod
+    def get_task_label(cls, state: str) -> str:
+        """Label for a background task starting or ending."""
+        return TASK_STATES.get(state, "🧝 An elf says:")
+
+    @classmethod
+    def get_compaction_label(cls) -> str:
+        """Label shown when the conversation is compacted."""
+        return "🛷 The sleigh was full, so the conversation was packed down"
+
 
 class GrinchTheme:
     """Minimal theme for those who prefer less festivity."""
@@ -191,3 +266,13 @@ class GrinchTheme:
             The tool name
         """
         return f"→ {tool_name}"
+
+    @staticmethod
+    def get_task_label(state: str) -> str:
+        """Minimal label for a background task starting or ending."""
+        return f"→ background task {state}:"
+
+    @staticmethod
+    def get_compaction_label() -> str:
+        """Minimal compaction label."""
+        return "Conversation compacted"

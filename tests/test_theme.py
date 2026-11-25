@@ -1,5 +1,7 @@
 """Tests for festive theming system."""
 
+import pytest
+
 from clause_code.theme import FestiveTheme, GrinchTheme
 
 
@@ -161,3 +163,56 @@ class TestThemeComparison:
         grinch_success = GrinchTheme.get_success_message()
 
         assert festive_success != grinch_success
+
+
+class TestChristmas:
+    @pytest.mark.parametrize(
+        "day, sleeps",
+        [
+            ((2026, 11, 24), 31),
+            ((2026, 12, 24), 1),
+            ((2026, 12, 25), 0),
+            ((2026, 12, 26), 364),
+            ((2027, 12, 26), 365),  # 2028 is a leap year
+        ],
+    )
+    def test_sleeps(self, day, sleeps):
+        from datetime import date
+
+        from clause_code.theme import sleeps_until_christmas
+
+        assert sleeps_until_christmas(date(*day)) == sleeps
+
+    def test_countdown_lines(self):
+        from datetime import date
+
+        from clause_code.theme import christmas_countdown
+
+        assert christmas_countdown(date(2026, 11, 24)) == "🎄 31 sleeps until Christmas"
+        assert "one more sleep" in christmas_countdown(date(2026, 12, 24))
+        assert "Merry Christmas" in christmas_countdown(date(2026, 12, 25))
+
+
+class TestSnowfall:
+    def test_frame_shape(self):
+        from clause_code.theme import snowfall
+
+        frames = snowfall(30, 6, 20, seed=1)
+
+        assert len(frames) == 20
+        assert all(len(frame) == 6 and all(len(row) == 30 for row in frame) for frame in frames)
+
+    def test_snow_settles(self):
+        from clause_code.theme import snowfall
+
+        frames = snowfall(30, 6, 40, seed=1)
+
+        assert frames[0][-1].strip() == ""
+        assert frames[-1][-1].count("█") > frames[5][-1].count("█")
+
+    def test_new_tool_labels(self):
+        assert (
+            FestiveTheme.get_tool_label("mcp__cheerlights__get_color") == "🎄 Checking the lights"
+        )
+        assert FestiveTheme.get_tool_label("PowerShell") == "🔔 Running"
+        assert GrinchTheme.get_compaction_label() == "Conversation compacted"

@@ -5,6 +5,7 @@ from unittest.mock import create_autospec
 import pytest
 from claude_agent_sdk import ClaudeSDKClient, CLIConnectionError, ResultMessage
 
+from clause_code import __version__
 from clause_code.agent import DEFAULT_MODEL, MODELS, ClauseAgent, build_persona
 from clause_code.permissions import ToolApprover
 from clause_code.theme import FestiveTheme, GrinchTheme
@@ -40,6 +41,7 @@ class FakeClientFactory:
                 yield message
 
         client.receive_response.side_effect = receive_response
+        client.receive_messages.side_effect = receive_response
         self.clients.append(client)
         self.options.append(options)
         return client
@@ -108,10 +110,16 @@ class TestOptions:
 
         assert options.permission_mode == "default"
         assert options.can_use_tool is approver
-        assert options.allowed_tools == []
+        # Only the read-only CheerLights tools skip the approval prompt
+        assert options.allowed_tools == [
+            "mcp__cheerlights__get_color",
+            "mcp__cheerlights__get_history",
+        ]
         assert "AskUserQuestion" in options.disallowed_tools
         matcher = options.hooks["PreToolUse"][0]
         assert "Write" in matcher.matcher and "Edit" in matcher.matcher
+        # A broken guard blocks the write instead of letting it through
+        assert matcher.on_failure == "block"
 
     def test_project_settings_only(self, agent):
         assert agent.build_options().setting_sources == ["project"]
@@ -122,7 +130,9 @@ class TestOptions:
         env = agent.build_options().env
 
         assert env["ANTHROPIC_API_KEY"] == api_key
-        assert env["CLAUDE_AGENT_SDK_CLIENT_APP"].startswith("clause-code/")
+
+    def test_identifies_itself(self, agent):
+        assert agent.build_options().client_app == f"clause-code/{__version__}"
 
     def test_no_api_key_uses_environment(self, agent):
         assert "ANTHROPIC_API_KEY" not in agent.build_options().env

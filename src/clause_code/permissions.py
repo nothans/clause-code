@@ -3,6 +3,7 @@
 import asyncio
 import difflib
 import json
+import os
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, Optional
@@ -14,9 +15,11 @@ from claude_agent_sdk import (
     PermissionResult,
     PermissionResultAllow,
     PermissionResultDeny,
+    PermissionUpdate,
     ToolPermissionContext,
 )
 from rich.console import Console, Group, RenderableType
+from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.text import Text
@@ -30,8 +33,13 @@ WRITE_TOOLS = {
 }
 WRITE_TOOLS_MATCHER = "|".join(WRITE_TOOLS)
 
+# Claude's CheerLights tool that posts to the user's Bluesky account
+SET_CHEERLIGHTS = "mcp__cheerlights__set_color"
+# Plan mode ends when Claude calls this and the user approves the plan
+EXIT_PLAN = "ExitPlanMode"
+
 # Tools that can never be approved for a whole session at once.
-NEVER_ALWAYS = {"Bash"}
+NEVER_ALWAYS = {"Bash", "PowerShell", SET_CHEERLIGHTS, EXIT_PLAN}
 
 PREVIEW_LINES = 40
 # Wrap rather than crop, so nothing the user approves is hidden off the edge
@@ -60,6 +68,17 @@ def is_within(path: str | Path, root: Path) -> bool:
     return True
 
 
+def claude_config_dir() -> Path:
+    """Where the Claude Code runtime keeps its own files (plans, sessions)."""
+    configured = os.environ.get("CLAUDE_CONFIG_DIR")
+    return Path(configured).expanduser() if configured else Path.home() / ".claude"
+
+
+def is_plan_file(path: str | Path) -> bool:
+    """Whether a path is a plan the runtime writes for itself in plan mode."""
+    return is_within(Path(path), claude_config_dir() / "plans")
+
+
 def display_path(path: str, root: Path) -> str:
     """Show a path relative to root when it is inside it."""
     try:
@@ -68,14 +87,19 @@ def display_path(path: str, root: Path) -> str:
         return path
 
 
-def make_containment_hook(get_root: Callable[[], Path]):
+def make_containment_hook(
+    get_root: Callable[[], Path], allow: Optional[Callable[[Path], bool]] = None
+):
     """Build a PreToolUse hook that denies file writes outside the project folder.
 
     Hooks run on every tool call, so this holds even when edits are
-    auto-accepted.
+    auto-accepted. Register it with ``on_failure="block"`` so a broken hook
+    blocks the write instead of letting it through.
 
     Args:
         get_root: Returns the current project folder
+        allow: Says yes to a path outside the project that may still be written
+            (the runtime's own plan file in plan mode)
 
     Returns:
         Hook callback for ClaudeAgentOptions.hooks
@@ -90,6 +114,8 @@ def make_containment_hook(get_root: Callable[[], Path]):
         target = input_data.get("tool_input", {}).get(key)
         root = get_root()
         if target and not is_within(target, root):
+            if allow is not None and allow(Path(target)):
+                return {}
             return {
                 "hookSpecificOutput": {
                     "hookEventName": "PreToolUse",
@@ -152,15 +178,31 @@ def render_request(
         parts.append(Syntax(_truncate("\n".join(diffs)), "diff", **PREVIEW_STYLE))
     elif tool_name == "Write":
         content = tool_input.get("content", "")
-        parts.append(Text(f"{path} ({len(content.splitlines())} lines)", style="bold"))
+        count = len(content.splitlines())
+        parts.append(Text(f"{path} ({count} line{'' if count == 1 else 's'})", style="bold"))
         lexer = Syntax.guess_lexer(path, code=content)
         parts.append(
             Syntax(_truncate(content.rstrip("\n")), lexer, line_numbers=True, **PREVIEW_STYLE)
         )
-    elif tool_name == "Bash":
+    elif tool_name == EXIT_PLAN:
+        title = context.title or "Claude's plan"
+        parts.append(Markdown(_truncate(str(tool_input.get("plan", "")), 80)))
+    elif tool_name == SET_CHEERLIGHTS:
+        title = "Claude wants to set the CheerLights color"
+        color = str(tool_input.get("color", ""))
+        parts.append(Text(f"Post to Bluesky: #cheerlights {color}", style="bold"))
+        parts.append(
+            Text(
+                "This is a public post from your account, and it changes the color of "
+                "CheerLights lights around the world.",
+                style="dim",
+            )
+        )
+    elif tool_name in ("Bash", "PowerShell"):
         if tool_input.get("description"):
             parts.append(Text(tool_input["description"], style="dim"))
-        parts.append(Syntax(tool_input.get("command", ""), "bash", **PREVIEW_STYLE))
+        lexer = "powershell" if tool_name == "PowerShell" else "bash"
+        parts.append(Syntax(tool_input.get("command", ""), lexer, **PREVIEW_STYLE))
     else:
         parts.append(Text(_truncate(json.dumps(tool_input, indent=2))))
 
@@ -199,6 +241,8 @@ class ToolApprover:
         # Set by the CLI so spinners pause while the user is asked something
         self.before_prompt: Optional[Callable[[], None]] = None
         self.after_prompt: Optional[Callable[[], None]] = None
+        # Called with True (auto-accept edits) or False when the user approves a plan
+        self.on_plan_approved: Optional[Callable[[bool], None]] = None
         # Parallel tool calls can request permission at the same time; ask one at a time
         self._lock = asyncio.Lock()
 
@@ -233,6 +277,8 @@ class ToolApprover:
         context: ToolPermissionContext,
     ) -> PermissionResult:
         self.console.print(render_request(tool_name, tool_input, context, self.get_root()))
+        if tool_name == EXIT_PLAN:
+            return await self._ask_plan()
 
         can_always = tool_name not in NEVER_ALWAYS
         prompt = (
@@ -252,4 +298,28 @@ class ToolApprover:
             return PermissionResultAllow()
         return PermissionResultDeny(
             message="The user declined this action. Ask them how they would like to proceed."
+        )
+
+    async def _ask_plan(self) -> PermissionResult:
+        prompt = "Start building? [y]es / [a]uto-accept edits / [n]o, keep planning: "
+        try:
+            answer = (await self.ask(prompt)).strip().lower()
+        except (KeyboardInterrupt, EOFError):
+            return PermissionResultDeny(message="The user interrupted.", interrupt=True)
+
+        if answer in ("y", "yes", "a", "auto"):
+            auto = answer in ("a", "auto")
+            if self.on_plan_approved:
+                self.on_plan_approved(auto)
+            return PermissionResultAllow(
+                updated_permissions=[
+                    PermissionUpdate(
+                        type="setMode",
+                        mode="acceptEdits" if auto else "default",
+                        destination="session",
+                    )
+                ]
+            )
+        return PermissionResultDeny(
+            message="The user wants to keep planning. Ask them what to change in the plan."
         )

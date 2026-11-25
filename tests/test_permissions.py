@@ -319,3 +319,120 @@ class TestRenderRequest:
 
         assert "60 more lines" in text
         assert "line 99" not in text
+
+
+class TestPlanApproval:
+    @pytest.fixture
+    def make_approver(self, recording_console, project_folder):
+        def make(*answers):
+            ask = AsyncMock(side_effect=list(answers))
+            approver = ToolApprover(recording_console, ask, lambda: project_folder)
+            approver.on_plan_approved = lambda auto: approved.append(auto)
+            return approver
+
+        approved = []
+        make.approved = approved
+        return make
+
+    async def ask_plan(self, approver):
+        return await approver(
+            "ExitPlanMode", {"plan": "1. Add **sleigh.py**\n2. Test it"}, ToolPermissionContext()
+        )
+
+    async def test_yes_builds_with_approvals(self, make_approver, recording_console):
+        approver = make_approver("y")
+
+        result = await self.ask_plan(approver)
+
+        assert isinstance(result, PermissionResultAllow)
+        assert result.updated_permissions[0].type == "setMode"
+        assert result.updated_permissions[0].mode == "default"
+        assert make_approver.approved == [False]
+        text = recording_console.export_text()
+        assert "Claude's plan" in text and "sleigh.py" in text
+
+    async def test_auto_builds_without_edit_prompts(self, make_approver):
+        result = await self.ask_plan(make_approver("a"))
+
+        assert result.updated_permissions[0].mode == "acceptEdits"
+        assert make_approver.approved == [True]
+
+    async def test_no_keeps_planning(self, make_approver):
+        result = await self.ask_plan(make_approver("n"))
+
+        assert isinstance(result, PermissionResultDeny)
+        assert "keep planning" in result.message
+        assert make_approver.approved == []
+
+    async def test_plan_is_never_remembered(self, make_approver):
+        approver = make_approver("y", "y")
+        await self.ask_plan(approver)
+        await self.ask_plan(approver)
+
+        assert "ExitPlanMode" not in approver.always_allowed
+
+
+class TestCheerLightsApproval:
+    async def test_post_shows_text_and_cannot_be_always_allowed(
+        self, recording_console, project_folder
+    ):
+        ask = AsyncMock(side_effect=["a", "y"])
+        approver = ToolApprover(recording_console, ask, lambda: project_folder)
+
+        first = await approver(
+            "mcp__cheerlights__set_color", {"color": "red"}, ToolPermissionContext()
+        )
+
+        # "a" is not offered for a public post, so it reads as a no
+        assert isinstance(first, PermissionResultDeny)
+        assert "[a]lways" not in ask.call_args.args[0]
+        text = recording_console.export_text()
+        assert "#cheerlights red" in text
+        assert "around the world" in text
+
+    async def test_powershell_cannot_be_always_allowed(self, recording_console, project_folder):
+        ask = AsyncMock(side_effect=["a"])
+        approver = ToolApprover(recording_console, ask, lambda: project_folder)
+
+        result = await approver("PowerShell", {"command": "Remove-Item x"}, ToolPermissionContext())
+
+        assert isinstance(result, PermissionResultDeny)
+        assert "PowerShell" not in approver.always_allowed
+        assert "Remove-Item" in recording_console.export_text()
+
+
+class TestContainmentAllow:
+    async def test_allow_callback_lets_one_outside_path_through(self, project_folder, temp_dir):
+        plan = temp_dir / "plans" / "plan.md"
+        guard = make_containment_hook(lambda: project_folder, allow=lambda p: p == plan)
+
+        allowed = await guard(hook_input("Write", file_path=str(plan)), None, None)
+        denied = await guard(
+            hook_input("Write", file_path=str(temp_dir / "elsewhere.md")), None, None
+        )
+
+        assert allowed == {}
+        assert denied["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+    async def test_no_opinion_is_an_empty_dict(self, project_folder):
+        """With on_failure="block", returning None would block every call."""
+        guard = make_containment_hook(lambda: project_folder)
+
+        assert await guard(hook_input("Read", file_path="/etc/hosts"), None, None) == {}
+        assert (
+            await guard(hook_input("Write", file_path=str(project_folder / "a.py")), None, None)
+            == {}
+        )
+
+
+class TestLineCount:
+    def test_one_line_is_singular(self, recording_console, project_folder):
+        recording_console.print(
+            render_request(
+                "Write",
+                {"file_path": str(project_folder / "hello.txt"), "content": "ho ho ho\n"},
+                ToolPermissionContext(),
+                project_folder,
+            )
+        )
+        assert "hello.txt (1 line)" in recording_console.export_text()

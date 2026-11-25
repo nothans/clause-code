@@ -316,7 +316,8 @@ class AutoAcceptCommand(Command):
                 "[bold green]🧝 Auto-accept on: file edits apply without asking.[/bold green]"
             )
             self.console.print(
-                "[dim]Shell commands still ask, and writes outside the project are always blocked.[/dim]"
+                "[dim]Shell commands that change things still ask, and writes outside the project "
+                "are always blocked.[/dim]"
             )
         else:
             self.console.print("[green]🔐 Auto-accept off: you'll approve each edit.[/green]")
@@ -447,8 +448,17 @@ class HelpCommand(Command):
     """Command to show help."""
 
     GROUPS = {
-        "Configuration": ["setkey", "project", "model", "autoaccept", "santa", "grinch"],
-        "Fun": ["advent"],
+        "Working with Claude": [
+            "plan",
+            "autoaccept",
+            "undo",
+            "check",
+            "resume",
+            "context",
+            "compact",
+        ],
+        "Configuration": ["setkey", "project", "model", "santa", "grinch"],
+        "Fun": ["cheerlights", "snow", "advent"],
         "Utility": ["clear", "help"],
     }
 
@@ -488,7 +498,15 @@ class HelpCommand(Command):
         self.console.print(
             "  • Just type naturally - Claude can read, edit, and run code in your project"
         )
-        self.console.print("  • You'll be asked before any file edit or shell command")
+        self.console.print(
+            "  • You'll be asked before any file edit or any shell command that changes things"
+        )
+        self.console.print(
+            "  • [cyan]/undo[/cyan] rolls back the files Claude edited in its last turn"
+        )
+        self.console.print(
+            "  • [cyan]/cheerlights[/cyan] lights the UI in the color lights worldwide are showing"
+        )
         self.console.print("  • Try [cyan]/advent[/cyan] for daily December challenges!")
         self.console.print("  • Press [cyan]Ctrl+C[/cyan] to interrupt Claude mid-turn")
         self.console.print("  • Press [cyan]Ctrl+D[/cyan] or type [cyan]/exit[/cyan] to quit\n")

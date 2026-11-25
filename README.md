@@ -1,54 +1,20 @@
-<div align="center">
+# Clause Code
 
-# 🎄 Clause Code
+A holiday-themed coding agent for your terminal, built on the Claude Agent SDK, that can wear the color of CheerLights lights around the world.
 
-**A festive AI coding assistant that brings holiday cheer to your terminal**
+![Clause Code in CheerLights mode: the prompt bulb and status line take the live CheerLights color while Claude edits a file after an approval](https://raw.githubusercontent.com/nothans/clause-code/main/docs/images/clause-code-screenshot.png)
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
-[![Claude Agent SDK](https://img.shields.io/badge/Claude-Agent%20SDK-orange.svg)](https://code.claude.com/docs/en/agent-sdk)
-[![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://github.com/nothans/clause-code/blob/main/LICENSE)
 
-</div>
+Clause Code runs Claude in a project folder.
+Claude reads, searches, edits, and runs code there, and you approve each change before it happens.
+It wraps the work in Santa or Grinch theming, can follow the live [CheerLights](https://cheerlights.com) color, and ships with an `/advent` calendar for December.
 
----
+## Quick start
 
-## 🎁 What is Clause Code?
-
-Clause Code is an interactive terminal coding agent built on the [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk). Claude can read your project, edit files, and run commands, and you approve every edit and shell command. All of it comes wrapped in holiday theming.
-
-**Key Features:**
-- 🛠️ A real coding agent: Claude reads, searches, edits, and runs code in your project folder
-- 🔐 You approve every file edit and shell command, with a diff or command preview first
-- 🧱 File writes outside the project folder are always blocked
-- 💬 Claude Opus 5.5 by default, with Sonnet 5.5 and Haiku 5.5 a `/model` away
-- 🎨 Streaming Markdown output with syntax highlighting and festive status messages
-- ⏸️ Ctrl+C interrupts Claude mid-turn without quitting
-- 📚 Command history with auto-completion
-- 🎅 Daily December coding challenges (advent calendar)
-
-## 📸 Screenshot
-
-<div align="center">
-
-![Clause Code in action](docs/images/clause-code-screenshot.png)
-
-*Clause Code's festive terminal interface*
-
-</div>
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- Python 3.10 or higher
-- An [Anthropic API key](https://console.anthropic.com/account/keys)
-
-The Claude Agent SDK ships with its own Claude Code runtime, so there is nothing else to install.
-
-### Installation
-
-#### Option 1: Using uv (Recommended)
+You need Python 3.10 or newer, [uv](https://docs.astral.sh/uv/), and an [Anthropic API key](https://console.anthropic.com/account/keys).
+The Claude Code runtime ships inside the `claude-agent-sdk` wheel, so there is nothing else to install.
 
 ```bash
 git clone https://github.com/nothans/clause-code.git
@@ -57,306 +23,88 @@ uv sync
 uv run clause-code
 ```
 
-#### Option 2: Using pip
+The first run asks for your API key (skipped when `ANTHROPIC_API_KEY` is set) and whether you want festive mode.
+Clause Code works in the folder you start it from; `--project PATH` picks another one.
 
 ```bash
-git clone https://github.com/nothans/clause-code.git
-cd clause-code
-
-# Create and activate virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install
-pip install -e .
-
-# Run
-clause-code
+uv run clause-code --project ~/code/sleigh   # work in another folder
+uv run clause-code --model haiku             # use a cheaper model for this session
+uv run clause-code --continue                # pick up the last conversation in this folder
 ```
 
-### First Run Setup
+## Example
 
-On first launch, Clause Code asks for:
+An excerpt from a run on 2026-11-24 (Clause Code 3.0.0, Claude Haiku 5.5) in CheerLights mode; some lines, including the file-write approval panel, are left out:
 
-1. Your Anthropic API key (skipped if `ANTHROPIC_API_KEY` is set)
-2. Festive mode or minimal mode
-
-Clause Code works in the folder you launch it from. Use `--project` for one session, or `/project` to switch and remember a folder for next time.
-
-```bash
-clause-code                          # work in the current folder
-clause-code --project ~/code/sleigh  # work in another folder
-clause-code --model sonnet           # use a different model for this session
-```
-
-## 📖 Usage
-
-### Just ask
-
-Describe what you want. Claude explores the project, makes changes, and runs commands, announcing each step as it goes:
-
-```
-🎅 > Add a --verbose flag to the CLI and a test for it
-
-📜 Reading src/cli.py
-🔍 Checking it twice: def main
-✂️ Re-wrapping src/cli.py
-╭─ Claude wants to edit src/cli.py ─────────────────────────╮
-│ --- a/src/cli.py                                          │
-│ +++ b/src/cli.py                                          │
-│ +    parser.add_argument("--verbose", action="store_true")│
-╰───────────────────────────────────────────────────────────╯
+```text
+● 🎅 > What color are the CheerLights right now, and who set it? One short sentence.
+🧰 Unpacking get_color
+🎄 Checking the lights
+The CheerLights are blue (#0000ff), set 11 minutes ago, and the setter isn't public. 💙
+🌟 Guided by the North Star to the answer!  2.3s · $0.0017
+  ●─●─●─●─●─●─●─●─●  Lights around the world are blue right now.
+● 🎅 > /plan
+🗺️ Plan mode on.
+● 🎅 > Create hello.txt containing the single line: ho ho ho. Keep the plan to two short lines.
+🗺️ Sketching the plan create-hello-txt-containing-the-vectorized-bee.md
+🗺️ Handing over the plan
+╭─ Claude's plan ──────────────────────────────────────────────────────────────────────────────────╮
+│ Create hello.txt in the sleigh-shop project root containing the single line "ho ho ho". Verify   │
+│ by reading the file back and confirming it holds exactly that line.                              │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
+Start building? [y]es / [a]uto-accept edits / [n]o, keep planning: y
+🎁 Wrapping up hello.txt
 Allow? [y]es / [a]lways for this session / [n]o: y
-🔔 Running pytest -q
-...
-✨ Sprinkled some magic dust on your solution!  18.2s · $0.0412
+🎅 Perfect! Added to the nice list!  9.5s · $0.0043
+● 🎅 > /undo
+⏪ Files are back to how they were before your last message.
+Shell command effects are not undone. Claude is told on your next message.
 ```
 
-### Approvals and safety
+The status line under the prompt shows the model, the permission mode, and the live color with when it was set.
 
-- **Reads and searches** inside the project run without asking.
-- **File edits and writes** show a diff or preview first. Answer `a` to allow that tool for the rest of the session, or turn on `/autoaccept`.
-- **Shell commands** always ask, and can't be approved for a whole session.
-- **Writes outside the project folder** are blocked by a hook, even with `/autoaccept` on.
-- Declining an action tells Claude to ask you how to proceed instead.
+## Features
 
-### Slash Commands
+- You approve every file edit and every shell command that changes something, with a diff or command preview first.
+- File writes outside the project folder are blocked by a hook that fails closed, even with `/autoaccept` on.
+- `/plan` has Claude read and propose a plan; nothing changes until you approve it.
+- `/undo` restores the files Claude edited in its last turn, and again for the turn before.
+- `/check` sends a reviewer subagent, which did not write the code and cannot edit files, to check the session's changes and answer NICE, NAUGHTY, or UNSURE.
+- `--continue`, `--resume`, and `/resume` pick up earlier conversations in the same folder.
+- `/cheerlights` themes the prompt, spinner, and status line in the live CheerLights color, says who set it when that is public, and gives Claude tools to read the color and its history.
+- Ctrl+C stops Claude's turn and keeps the conversation, on Windows as well as macOS and Linux.
 
-| Command | Description |
-|---------|-------------|
-| `/help` | Show all available commands |
-| `/setkey` | Configure or update your Anthropic API key |
-| `/model` | Switch between Claude models (Opus, Sonnet, Haiku) |
-| `/project` | Set your working folder (starts a new conversation) |
-| `/autoaccept` | Apply file edits without asking (`on`/`off`) |
-| `/santa` | Enable festive mode with maximum holiday cheer |
-| `/grinch` | Switch to minimal mode (less festive) |
-| `/advent` | Get daily coding challenges (December only) |
-| `/clear` | Clear the screen and start a new conversation |
-| `/exit` or `/quit` | Exit Clause Code |
+## Limits
 
-## 🎨 Features in Detail
+- `/undo` restores files that Claude changed with its edit tools; it does not undo shell commands.
+- Shell commands that the Claude Code runtime classifies as read-only, such as `git status` or `Get-ChildItem`, run without asking.
+- Who set a CheerLights color is known only for colors set from Bluesky; Discord and the other channels do not publish it.
+- Setting the CheerLights color needs a Bluesky account and posts publicly from it.
+- Claude's tone follows `/santa` and `/grinch` from the next `/clear`; the status messages change at once.
+- Tested on Windows 11 and Ubuntu (WSL) with Python 3.12; not tested on macOS.
 
-### Claude Models
+## Documentation
 
-- **Opus 5.5** (Default): most capable, best for complex coding and agentic work
-- **Sonnet 5.5**: fast and capable for everyday coding
-- **Haiku 5.5**: fastest and cheapest, for quick questions
+- [Commands](https://github.com/nothans/clause-code/blob/main/docs/commands.md): every slash command, command-line flag, and keyboard shortcut.
+- [CheerLights mode](https://github.com/nothans/clause-code/blob/main/docs/cheerlights.md): what it shows, where the color comes from, and how to set it.
+- [Configuration](https://github.com/nothans/clause-code/blob/main/docs/configuration.md): `config.json`, environment variables, and where the API key is kept.
+- [How it works](https://github.com/nothans/clause-code/blob/main/docs/how-it-works.md): approvals, the write guard, undo, plan mode, background tasks, and the SDK features behind them.
+- [Troubleshooting](https://github.com/nothans/clause-code/blob/main/docs/troubleshooting.md): authentication, a missing runtime, and Ctrl+C.
+- [What's new in 3.0](https://github.com/nothans/clause-code/blob/main/docs/whats-new-3.0.md): the changes since 2.0.
+- [Introducing Clause Code](https://nothans.com/introducing-clause-code): the blog post that started it.
 
-All three have a 1M token context window. Switch anytime with `/model`; the conversation carries over.
-
-### Festive Theming
-
-Two delightful themes:
-
-- **Santa Mode**: full holiday cheer in status messages, tool announcements, and Claude's tone
-- **Grinch Mode**: minimal, professional output for when you need focus
-
-Watch Clause Code "think" with festive states:
-- 🎅 Sleighing...
-- 🎄 Jingling...
-- ⛷️ Snowboarding...
-- 🎁 Unwrapping...
-- ❄️ Crystallizing...
-- And more!
-
-The status messages switch immediately; Claude's own tone follows from the next `/clear`.
-
-### Project instructions
-
-Clause Code loads your project's `CLAUDE.md` and `.claude/settings.json`, so project conventions and permission rules you already use with Claude Code apply here too. Your personal `~/.claude` settings are not loaded.
-
-### Advent Calendar
-
-Daily coding challenges throughout December:
+## Development
 
 ```bash
-🎅 > /advent
-
-🎄 Advent Calendar - December 5 🎄
-❄️ Day 5: Build a snowflake pattern generator using ASCII art
-```
-
-## ⚙️ Configuration
-
-Clause Code stores its settings in `~/.clause-code/`:
-
-```
-~/.clause-code/
-├── config.json      # Application settings
-├── .api_key         # API key, readable only by you (not encrypted)
-└── history          # Command history
-```
-
-### Configuration Options
-
-You can configure via commands or by editing `config.json`:
-
-```json
-{
-  "default_model": "opus",
-  "festive_mode": true,
-  "project_folder": "/path/to/your/project"
-}
-```
-
-`project_folder` is used when you launch without `--project`; if it's unset or missing, Clause Code uses the current folder.
-
-### Environment Variables
-
-```bash
-export ANTHROPIC_API_KEY=sk-ant-your-key-here
-```
-
-A key in the environment takes precedence over the saved key and is never written to disk.
-
-## 🏗️ Architecture
-
-```
-src/clause_code/
-├── __init__.py
-├── __main__.py         # Entry point
-├── _version.py         # Version
-├── cli.py              # Chat loop, command routing, first-run setup
-├── agent.py            # Claude Agent SDK session (models, options, lifecycle)
-├── permissions.py      # Approval prompts and the project-folder write guard
-├── render.py           # Streaming output, tool announcements, errors
-├── theme.py            # Holiday theming system
-├── commands/           # Slash command handlers
-│   ├── __init__.py
-│   ├── base.py
-│   └── config.py
-└── utils/
-    ├── __init__.py
-    └── config.py       # Configuration management
-```
-
-### Key Components
-
-- **Agent (agent.py)**: wraps `ClaudeSDKClient`. It uses Claude Code's system prompt plus the Clause Code persona, and owns session lifecycle, model switching, and permission modes.
-- **Permissions (permissions.py)**: the `can_use_tool` callback that shows previews and asks you, plus a `PreToolUse` hook that blocks writes outside the project.
-- **Renderer (render.py)**: turns SDK messages into terminal output. Text streams as a live preview and is then rendered as Markdown. Model output is never parsed as Rich markup.
-- **CLI (cli.py)**: prompt loop, slash commands, and Ctrl+C handling that interrupts the current turn.
-- **Theme (theme.py)**: festive messages, tool labels, and ASCII art.
-
-## 🧪 Development
-
-### Setup Development Environment
-
-```bash
-git clone https://github.com/nothans/clause-code.git
-cd clause-code
 uv sync --extra dev
-
-# Run tests
 uv run pytest
-
-# Lint and format
 uv run ruff check src tests
-uv run ruff format src tests
 ```
 
-The tests mock the SDK client with `create_autospec(ClaudeSDKClient)`, so a call that doesn't match the real SDK's signature fails the test instead of passing silently. They make no network calls.
+The tests replace the SDK client with `create_autospec(ClaudeSDKClient)`, so a call that does not match the real SDK fails, and they make no network calls.
+`CLAUSE_LIVE=1 uv run pytest tests/test_live.py` checks the CheerLights code against the real ThingSpeak, MQTT, and Bluesky services; nothing is posted.
 
-### Project Structure
+## License
 
-```
-clause-code/
-├── src/clause_code/     # Main package
-├── tests/               # Test suite
-├── docs/images/         # Screenshots
-├── pyproject.toml       # Project configuration
-├── uv.lock              # Locked dependency versions
-├── README.md            # This file
-└── LICENSE              # MIT License
-```
-
-## 🤝 Contributing
-
-Contributions are welcome! Here's how you can help:
-
-1. **Report Bugs**: open an issue with details
-2. **Suggest Features**: share your ideas for new commands or features
-3. **Submit PRs**: fork, create a feature branch, and submit a PR
-4. **Add Festive Content**: more holiday messages, ASCII art, or challenges
-
-### Contribution Guidelines
-
-- Format and lint with ruff (`ruff format`, `ruff check`)
-- Add tests for new features
-- Update documentation for user-facing changes
-- Keep the festive spirit alive!
-
-## 📦 Dependencies
-
-### Core Dependencies
-
-- **claude-agent-sdk**: Claude Code as a library (agent loop, built-in tools, permissions, hooks)
-- **rich**: terminal formatting, Markdown, and syntax highlighting
-- **prompt-toolkit**: interactive input with history and auto-completion
-- **pydantic**: configuration validation
-
-### Development Dependencies
-
-- **pytest** / **pytest-asyncio**: testing
-- **ruff**: linting and formatting
-
-## 📋 Keyboard Shortcuts
-
-- **↑/↓**: navigate command history
-- **Tab**: auto-complete slash commands
-- **Ctrl+C**: interrupt Claude's current turn (or decline at an approval prompt)
-- **Ctrl+D**: exit application
-
-## ❓ Troubleshooting
-
-### "Authentication failed"
-
-Check your API key:
-```bash
-clause-code
-🎅 > /setkey
-```
-
-Or set the environment variable:
-```bash
-export ANTHROPIC_API_KEY=sk-ant-your-key-here
-```
-
-### "Claude Code runtime ... is missing"
-
-The runtime ships inside the `claude-agent-sdk` wheel. Reinstall it:
-```bash
-pip install --force-reinstall claude-agent-sdk
-```
-
-### "Command not found: clause-code"
-
-Make sure your virtual environment is activated or use:
-```bash
-python -m clause_code
-```
-
-### Ctrl+C quits instead of interrupting on Windows
-
-Interrupting a turn uses POSIX signal handling. On Windows, Ctrl+C during a turn exits Clause Code.
-
-## 🎅 Credits
-
-- **Created by** [Hans Scharler](https://nothans.com)
-- **Powered by** [Anthropic Claude](https://www.anthropic.com) and the Claude Agent SDK
-- **Built with** Python, Rich, and holiday spirit
-
----
-
-<div align="center">
-
-**Happy Coding and Happy Holidays!**
-
-🎅 🎄 ❄️ 🎁 ⭐ 🔔 🛷 ☃️
-
-Made with ❤️ and festive cheer
-
-[Report Bug](https://github.com/nothans/clause-code/issues) · [Request Feature](https://github.com/nothans/clause-code/issues) · [Documentation](https://github.com/nothans/clause-code#readme)
-
-</div>
+MIT. See [LICENSE](https://github.com/nothans/clause-code/blob/main/LICENSE).
+Created by [Hans Scharler](https://nothans.com).
